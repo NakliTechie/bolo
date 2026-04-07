@@ -1096,6 +1096,9 @@ const S = {
   audioMeter: null, // { ctx, analyser, data, rafId, sourceNode }
   history: [],          // [{ id, blob, mime, sizeBytes, timestamp, name, transcript }]
   activeHistoryId: null,
+  // Speculative pre-transcription pipeline (model load → audio extract → inference)
+  // runs invisibly while the user is "flapping around" deciding what to do.
+  preTranscribe: { promise: null, result: null, key: null },
 };
 const HISTORY_MAX = 5;
 
@@ -1840,6 +1843,10 @@ function onRecorderStopped() {
   }
   setState('done');
   updateRecordButton();
+  // Speculative pre-transcription: model load → audio extract → inference,
+  // all silent. Most users spend several seconds reviewing — by the time
+  // they click Generate Captions, the result is already waiting.
+  startPreTranscribe();
 }
 
 function resetToIdle() {
@@ -1860,6 +1867,7 @@ function resetToIdle() {
   captionsOverlay.classList.remove('on');
   hideProgress();
   hideWarning();
+  invalidatePreTranscribe();
   setState(S.sources.screen || S.sources.webcam || S.sources.mic ? 'configuring' : 'idle');
   setSetupPanelsVisible(true);    // bring back Sources / Overlay (if both on) / Settings
   updatePreview();
@@ -2148,6 +2156,9 @@ function loadHistoryItem(id) {
     $('btnTranscribe').textContent = '✨ Generate Captions';
     $('btnDownload').textContent = '↓ Download';
     $('btnSaveAs').textContent = '💾 Save As…';
+    // Reloaded a recording without captions — start the pre-transcribe pipeline
+    invalidatePreTranscribe();
+    startPreTranscribe();
   }
   setState('done');
   updateRecordButton();
@@ -2302,13 +2313,17 @@ async function saveAs(blob, suggestedName) {
 // ---------- Transcription (Whisper via Transformers.js) ----------
 let transcriber = null;
 let transcriberModelId = null;
-async function loadWhisper() {
+// loadWhisper(progressCb) — if a callback is supplied the loader is silent
+// (no UI mutations), suitable for background pre-transcribe. Without it,
+// the default updates the progress panel.
+async function loadWhisper(progressCb) {
   const wantedModel = S.settings.whisperModel;
   if (transcriber && transcriberModelId === wantedModel) return transcriber;
   // Different model requested — drop the old pipeline.
   transcriber = null;
   transcriberModelId = null;
-  setProgress(0, `Loading ${wantedModel.split('/')[1]}…`);
+  const silent = typeof progressCb === 'function';
+  if (!silent) setProgress(0, `Loading ${wantedModel.split('/')[1]}…`);
   try {
     const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
     env.allowLocalModels = false;
@@ -2319,6 +2334,7 @@ async function loadWhisper() {
       {
         quantized: true,
         progress_callback: p => {
+          if (silent) { try { progressCb(p); } catch(e) {} return; }
           if (p.status === 'progress') {
             setProgress((p.progress || 0) / 100, `Downloading ${p.file || 'model'}… ${Math.round(p.progress || 0)}%`);
           } else if (p.status === 'loading') {
@@ -2333,9 +2349,118 @@ async function loadWhisper() {
     return transcriber;
   } catch (e) {
     console.error('Whisper load failed', e);
-    showWarning('Failed to load Whisper: ' + e.message);
-    hideProgress();
+    if (!silent) {
+      showWarning('Failed to load Whisper: ' + e.message);
+      hideProgress();
+    }
     throw e;
+  }
+}
+
+// Decode a recorded blob to 16 kHz mono Float32 (Whisper's expected input)
+async function extractAudioFromBlob(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+  return { channelData: audioBuffer.getChannelData(0), duration: audioBuffer.duration };
+}
+
+// Identity tuple for the active recording + transcription settings.
+// If this changes, any pre-transcribed cache is stale and must be discarded.
+function preTranscribeKey() {
+  if (!S.recordedBlob) return null;
+  return [
+    S.activeHistoryId || 'live',
+    S.recordedBlob.size,
+    S.settings.whisperModel,
+    S.settings.whisperLang,
+    S.settings.whisperTranslate ? 1 : 0,
+  ].join('|');
+}
+
+// Build Whisper inference options from current settings
+function whisperOpts() {
+  const opts = {
+    chunk_length_s: 30,
+    stride_length_s: 5,
+    return_timestamps: true,
+    task: S.settings.whisperTranslate ? 'translate' : 'transcribe',
+  };
+  if (S.settings.whisperLang && S.settings.whisperLang !== 'auto') {
+    opts.language = S.settings.whisperLang;
+  }
+  return opts;
+}
+
+// Convert Whisper's raw result into our segment shape
+function segmentsFromWhisperResult(result, fallbackDuration) {
+  let segments = [];
+  if (result.chunks && result.chunks.length > 0) {
+    segments = result.chunks.map(c => ({
+      start: c.timestamp[0] || 0,
+      end: c.timestamp[1] || (c.timestamp[0] || 0) + 2,
+      text: (c.text || '').trim(),
+    })).filter(s => s.text);
+  } else if (result.text) {
+    segments = [{ start: 0, end: fallbackDuration || 0, text: result.text.trim() }];
+  }
+  return segments;
+}
+
+// Speculative pipeline: model → audio extract → inference, all silent.
+// Kicked off as soon as a recording is captured. If the user clicks
+// "Generate Captions" before it finishes, transcribeRecording awaits this
+// same promise; if after, it's instant.
+function startPreTranscribe() {
+  if (!S.recordedBlob) return;
+  if (S.transcript) return; // already have one
+  const key = preTranscribeKey();
+  // Already running or completed for these inputs?
+  if (S.preTranscribe.key === key && (S.preTranscribe.promise || S.preTranscribe.result)) return;
+
+  S.preTranscribe.promise = null;
+  S.preTranscribe.result = null;
+  S.preTranscribe.key = key;
+  const blobAtStart = S.recordedBlob;
+  const keyAtStart = key;
+
+  S.preTranscribe.promise = (async () => {
+    try {
+      // Stage 1 — load model (silent)
+      const pipe = await loadWhisper(() => {});
+      if (S.recordedBlob !== blobAtStart || S.preTranscribe.key !== keyAtStart) throw new Error('cancelled');
+      // Stage 2 — extract audio
+      const { channelData, duration } = await extractAudioFromBlob(blobAtStart);
+      if (S.recordedBlob !== blobAtStart || S.preTranscribe.key !== keyAtStart) throw new Error('cancelled');
+      // Stage 3 — inference
+      const result = await pipe(channelData, whisperOpts());
+      if (S.recordedBlob !== blobAtStart || S.preTranscribe.key !== keyAtStart) throw new Error('cancelled');
+      const segments = segmentsFromWhisperResult(result, duration);
+      S.preTranscribe.result = segments;
+      // Subtle UI hint that captions are ready instantly. Only update if
+      // we're still on the same recording the user is looking at.
+      if (S.preTranscribe.key === preTranscribeKey() && !S.transcript) {
+        const btn = $('btnTranscribe');
+        if (btn) btn.textContent = '⚡ Captions ready';
+      }
+      return segments;
+    } catch (e) {
+      // Silent failure — the foreground path will retry with full UI on click
+      if (e.message !== 'cancelled') console.warn('Pre-transcribe failed', e);
+      throw e;
+    }
+  })();
+  // Don't let an unhandled rejection escape
+  S.preTranscribe.promise.catch(() => {});
+}
+
+function invalidatePreTranscribe() {
+  S.preTranscribe.promise = null;
+  S.preTranscribe.result = null;
+  S.preTranscribe.key = null;
+  const btn = $('btnTranscribe');
+  if (btn && btn.textContent === '⚡ Captions ready') {
+    btn.textContent = '✨ Generate Captions';
   }
 }
 
@@ -2347,48 +2472,44 @@ async function transcribeRecording() {
   hideWarning();
 
   try {
-    const pipe = await loadWhisper();
-    setProgress(0.1, 'Extracting audio…');
+    let segments = null;
+    const key = preTranscribeKey();
 
-    const arrayBuffer = await S.recordedBlob.arrayBuffer();
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-    let audioBuffer;
-    try {
-      audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-    } catch (e) {
-      showWarning('Could not decode audio from the recording. Did you include a mic or system audio?');
-      throw e;
+    // Fast path: pre-transcribe finished or is in flight for this exact recording + settings
+    if (S.preTranscribe.key === key && (S.preTranscribe.result || S.preTranscribe.promise)) {
+      if (S.preTranscribe.result) {
+        // Truly instant — model loaded, audio extracted, inference done
+        segments = S.preTranscribe.result;
+        setProgress(1, 'Captions ready (precomputed).');
+      } else {
+        // In-flight — show progress while we await the same promise
+        setProgress(0.5, 'Finishing transcription (already in progress)…');
+        try {
+          segments = await S.preTranscribe.promise;
+        } catch (e) {
+          segments = null; // fall through to fresh attempt
+        }
+      }
     }
-    const channelData = audioBuffer.getChannelData(0);
 
-    setProgress(0.3, 'Running Whisper (this takes ~30s per minute of audio)…');
-
-    const opts = {
-      chunk_length_s: 30,
-      stride_length_s: 5,
-      return_timestamps: true,
-      task: S.settings.whisperTranslate ? 'translate' : 'transcribe',
-    };
-    // Only pass language if user picked one — omit lets Whisper auto-detect
-    if (S.settings.whisperLang && S.settings.whisperLang !== 'auto') {
-      opts.language = S.settings.whisperLang;
+    // Slow path: nothing precomputed — run the full pipeline now
+    if (!segments) {
+      const pipe = await loadWhisper();
+      setProgress(0.1, 'Extracting audio…');
+      let extracted;
+      try {
+        extracted = await extractAudioFromBlob(S.recordedBlob);
+      } catch (e) {
+        showWarning('Could not decode audio from the recording. Did you include a mic or system audio?');
+        throw e;
+      }
+      setProgress(0.3, 'Running Whisper (this takes ~30s per minute of audio)…');
+      const result = await pipe(extracted.channelData, whisperOpts());
+      segments = segmentsFromWhisperResult(result, extracted.duration);
     }
-    const result = await pipe(channelData, opts);
 
     setProgress(1, 'Done');
     setTimeout(hideProgress, 600);
-
-    // Build segments
-    let segments = [];
-    if (result.chunks && result.chunks.length > 0) {
-      segments = result.chunks.map(c => ({
-        start: c.timestamp[0] || 0,
-        end: c.timestamp[1] || (c.timestamp[0] || 0) + 2,
-        text: (c.text || '').trim()
-      })).filter(s => s.text);
-    } else if (result.text) {
-      segments = [{ start: 0, end: audioBuffer.duration, text: result.text.trim() }];
-    }
 
     S.transcript = segments;
     renderTranscript();
@@ -2512,9 +2633,9 @@ $('mirrorToggle').addEventListener('change', e => {
 $('fpsSelect').addEventListener('change', e => { S.settings.fps = parseInt(e.target.value, 10); saveSettings(); });
 $('formatSelect').addEventListener('change', e => { S.settings.format = e.target.value; saveSettings(); });
 $('resSelect').addEventListener('change', e => { S.settings.maxHeight = parseInt(e.target.value, 10); saveSettings(); });
-$('modelSelect').addEventListener('change', e => { S.settings.whisperModel = e.target.value; saveSettings(); });
-$('langSelect').addEventListener('change', e => { S.settings.whisperLang = e.target.value; saveSettings(); });
-$('translateToggle').addEventListener('change', e => { S.settings.whisperTranslate = e.target.checked; saveSettings(); });
+$('modelSelect').addEventListener('change', e => { S.settings.whisperModel = e.target.value; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
+$('langSelect').addEventListener('change', e => { S.settings.whisperLang = e.target.value; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
+$('translateToggle').addEventListener('change', e => { S.settings.whisperTranslate = e.target.checked; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
 
 // Actions
 fabRecord.addEventListener('click', () => {
