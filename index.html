@@ -1958,6 +1958,11 @@ async function loadFfmpeg(onProgress) {
         classWorkerURL,
       });
       ffmpegInstance = ff;
+      // Live-update the edit panel status if it's currently open. Lets the
+      // hint flip from "loading editor…" to "editor ready" without any user
+      // interaction — same vibe as the "⚡ Captions ready" hint.
+      const statusEl = document.getElementById('ffmpegStatus');
+      if (statusEl) statusEl.textContent = '· editor ready';
       return ff;
     } catch (e) {
       console.error('ffmpeg load failed', e);
@@ -2206,6 +2211,9 @@ function loadHistoryItem(id) {
     invalidatePreTranscribe();
     startPreTranscribe();
   }
+  // User just opened a recording — they're likely about to edit it.
+  // Kick off ffmpeg.wasm in the background so trim/burn-in are instant.
+  prefetchFfmpeg();
   setState('done');
   updateRecordButton();
   renderHistory();
@@ -2575,6 +2583,10 @@ function startPreTranscribe() {
         const btn = $('btnTranscribe');
         if (btn) btn.textContent = '⚡ Captions ready';
       }
+      // Now that Whisper is done downloading and crunching, kick off the
+      // ffmpeg.wasm prefetch in the background so it's also ready by the
+      // time the user clicks Apply Edit. Idempotent — no-op if already loading.
+      prefetchFfmpeg();
       return segments;
     } catch (e) {
       // Silent failure — the foreground path will retry with full UI on click
@@ -2658,6 +2670,9 @@ async function transcribeRecording() {
     setState('done');
     $('btnTranscribe').disabled = false;
     $('btnTranscribe').textContent = '✨ Re-transcribe';
+    // Whisper crunch is over — chain the ffmpeg.wasm prefetch so trim and
+    // burn-in are ready instantly when the user clicks Apply Edit.
+    prefetchFfmpeg();
   } catch (e) {
     console.error(e);
     setState('done');
