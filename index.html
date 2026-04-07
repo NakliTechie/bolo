@@ -422,6 +422,26 @@
   .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
   .btn-ghost { background: transparent; }
   .btn-danger { color: var(--accent); }
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 11px;
+    flex: 1;
+  }
+
+  /* One-row "Export: SRT VTT TXT" footer for the transcript panel */
+  .export-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .export-label {
+    font-size: 10px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: 4px;
+  }
 
   /* Floating control bar during recording */
   .float-bar {
@@ -967,14 +987,7 @@
       <div class="warning" id="warningBox"></div>
     </div>
 
-    <!-- Recent recordings (session history) -->
-    <div class="panel hidden" id="panelHistory">
-      <h3>Recent recordings <span class="count" id="histCount"></span></h3>
-      <div class="history-list" id="historyList"></div>
-      <div class="hint" style="margin-top:8px">Saved in your browser's private storage (~500 MB cap, oldest auto-evicted). Use Download or Save As to copy them to disk.</div>
-    </div>
-
-    <!-- Transcript -->
+    <!-- Transcript (sits right under Edit, above History) -->
     <div class="panel hidden" id="panelTranscript">
       <h3>Transcript <span class="count" id="segCount"></span></h3>
       <label class="toggle-row" style="margin-bottom:8px">
@@ -982,15 +995,19 @@
         <span>Show captions on video</span>
       </label>
       <div class="transcript" id="transcriptList"></div>
-      <div class="hint" style="margin-top:10px">
-        Download bundles the .webm and a same-name .srt — VLC, IINA and mpv auto-load it.
-        Permanently burning captions into the pixels needs ffmpeg.wasm — coming in Phase 3.
+      <div class="export-row">
+        <span class="export-label">Export</span>
+        <button class="btn btn-sm" id="btnExportSrt">SRT</button>
+        <button class="btn btn-sm" id="btnExportVtt">VTT</button>
+        <button class="btn btn-sm" id="btnExportTxt">TXT</button>
       </div>
-      <div class="actions" style="margin-top:8px">
-        <button class="btn" id="btnExportSrt">Export .srt</button>
-        <button class="btn" id="btnExportVtt">Export .vtt</button>
-        <button class="btn" id="btnExportTxt">Export .txt</button>
-      </div>
+    </div>
+
+    <!-- Recent recordings (session history) -->
+    <div class="panel hidden" id="panelHistory">
+      <h3>Recent recordings <span class="count" id="histCount"></span></h3>
+      <div class="history-list" id="historyList"></div>
+      <div class="hint" style="margin-top:8px">Saved in your browser's private storage (~500 MB cap, oldest auto-evicted). Use Download or Save As to copy them to disk.</div>
     </div>
   </aside>
 </main>
