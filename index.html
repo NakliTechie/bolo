@@ -1,0 +1,2689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Chirag Patnaik">
+<meta name="description" content="Bolo — record your screen, speak your mind. Nothing leaves your device.">
+<title>Bolo — Browser-Native Screen Recorder</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23e53935'/%3E%3Ccircle cx='16' cy='16' r='6' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0e0e10;
+    --bg-2: #17171a;
+    --bg-3: #1f1f24;
+    --border: #2a2a30;
+    --border-2: #3a3a42;
+    --text: #ececf1;
+    --text-dim: #9a9aa6;
+    --text-mute: #6b6b78;
+    --accent: #e53935;
+    --accent-hover: #f4433c;
+    --accent-dim: rgba(229, 57, 53, 0.15);
+    --ok: #4ade80;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  /* ===== Header ===== */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 16px;
+  }
+  .brand-dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+  }
+  .brand-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+    margin-left: 2px;
+  }
+  .status-pill {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+  }
+  .status-pill.rec { color: var(--accent); border-color: var(--accent); }
+  .status-pill.ok { color: var(--ok); }
+  .help-btn {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border-2);
+    background: var(--bg-3);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .help-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  /* ===== Main ===== */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 12px;
+    padding: 12px 18px 90px;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    align-items: start;            /* prevent sidebar height from stretching the stage */
+  }
+  @media (max-width: 960px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  /* Preview stage — locked height regardless of sidebar contents */
+  .stage {
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    height: clamp(320px, calc(100vh - 180px), 760px);
+    position: sticky;        /* stays visible when sidebar pushes the page taller */
+    top: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stage-empty {
+    color: var(--text-mute);
+    font-size: 13px;
+    text-align: center;
+    padding: 24px;
+    max-width: 380px;
+  }
+  .stage-empty h2 {
+    color: var(--text);
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .stage-empty .tag {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: block;
+  }
+  #previewVideo, #recordedVideo {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #000;
+    display: none;
+  }
+  #previewVideo.on, #recordedVideo.on { display: block; }
+
+  /* Captions overlay during playback */
+  .captions-overlay {
+    position: absolute;
+    bottom: 12%;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 82%;
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: center;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.85);
+    display: none;
+    pointer-events: none;
+    z-index: 6;
+    backdrop-filter: blur(4px);
+  }
+  .captions-overlay.on { display: block; }
+  .captions-overlay:empty { display: none !important; }
+
+  .countdown {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.6);
+    z-index: 5;
+  }
+  .countdown.on { display: flex; }
+  .countdown-num {
+    font-size: 180px;
+    font-weight: 800;
+    color: white;
+    text-shadow: 0 4px 30px rgba(229, 57, 53, 0.8);
+    animation: pop 1s ease-out;
+  }
+  @keyframes pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    30% { opacity: 1; }
+    100% { transform: scale(1.1); opacity: 0.9; }
+  }
+
+  .rec-overlay {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0,0,0,0.7);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    z-index: 4;
+  }
+  .rec-overlay.on { display: flex; }
+  .rec-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: blink 1.2s infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ===== Sidebar ===== */
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .panel {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .panel h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-mute);
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel h3 .count {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-size: 10px;
+  }
+
+  /* Source toggle row */
+  .source-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .source-btn {
+    flex: 1;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 4px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    transition: all 0.15s;
+  }
+  .source-btn:hover { border-color: var(--border-2); color: var(--text); }
+  .source-btn.on {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+  .source-btn .icon { font-size: 16px; }
+
+  select, input[type="text"], input[type="number"] {
+    width: 100%;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--accent); }
+
+  .field { margin-bottom: 8px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .hint {
+    font-size: 10px;
+    color: var(--text-mute);
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .chip {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .chip:hover { color: var(--text); }
+  .chip.on {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .level-meter {
+    height: 6px;
+    background: var(--bg-3);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .level-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--ok), var(--warn), var(--accent));
+    width: 0%;
+    transition: width 0.05s linear;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .toggle-row input { accent-color: var(--accent); }
+
+  /* Big action button */
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .btn {
+    border: 1px solid var(--border);
+    background: var(--bg-3);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--border-2); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    padding: 14px 14px;
+    font-size: 14px;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn-ghost { background: transparent; }
+  .btn-danger { color: var(--accent); }
+
+  /* Floating control bar during recording */
+  .float-bar {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(14, 14, 16, 0.96);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    padding: 10px 18px;
+    display: none;
+    align-items: center;
+    gap: 14px;
+    z-index: 100;
+    box-shadow: 0 8px 40px rgba(229, 57, 53, 0.35);
+    backdrop-filter: blur(10px);
+    cursor: move;
+    user-select: none;
+  }
+  .float-bar.on { display: flex; }
+  .float-bar .rec-dot { width: 8px; height: 8px; }
+  .float-bar .timer {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 13px;
+    min-width: 56px;
+  }
+  .float-bar button {
+    background: transparent;
+    border: 1px solid var(--border-2);
+    color: var(--text);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .float-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .float-bar .stop {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .float-bar .stop:hover { background: var(--accent-hover); color: white; }
+
+  /* Trim timeline */
+  .trim-bar {
+    margin-top: 8px;
+  }
+  .trim-track {
+    position: relative;
+    height: 28px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .trim-range {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--accent-dim);
+    border-left: 2px solid var(--accent);
+    border-right: 2px solid var(--accent);
+    pointer-events: none;
+  }
+  .trim-handle {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 14px;
+    background: var(--accent);
+    border-radius: 4px;
+    cursor: ew-resize;
+    transform: translateX(-50%);
+    box-shadow: 0 2px 6px rgba(229, 57, 53, 0.5);
+    z-index: 2;
+  }
+  .trim-handle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 12px;
+    background: white;
+    border-radius: 1px;
+  }
+  .trim-times {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-mute);
+    margin-top: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* History list */
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .hist-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .hist-item.active {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+  }
+  .hist-info { flex: 1; min-width: 0; }
+  .hist-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hist-meta {
+    font-size: 10px;
+    color: var(--text-mute);
+    margin-top: 2px;
+  }
+  .hist-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-family: inherit;
+  }
+  .hist-btn:hover { color: var(--text); border-color: var(--border-2); }
+  .hist-btn[data-act="del"]:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Transcript panel */
+  .transcript {
+    max-height: 320px;
+    overflow-y: auto;
+    font-size: 12px;
+    padding-right: 4px;
+  }
+  .transcript::-webkit-scrollbar { width: 6px; }
+  .transcript::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+  .seg {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    cursor: pointer;
+  }
+  .seg:hover { background: var(--bg-3); }
+  .seg .ts {
+    color: var(--text-mute);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    font-size: 11px;
+    padding-top: 1px;
+  }
+  .seg .txt {
+    flex: 1;
+    color: var(--text);
+    outline: none;
+  }
+  .seg .txt[contenteditable="true"]:focus { background: var(--bg-3); border-radius: 4px; padding: 2px 4px; }
+
+  .progress-wrap {
+    display: none;
+    margin-top: 10px;
+  }
+  .progress-wrap.on { display: block; }
+  .progress-bar {
+    height: 6px;
+    background: var(--bg-3);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s;
+  }
+  .progress-text {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .warning {
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--warn);
+    margin-top: 10px;
+    display: none;
+  }
+  .warning.on { display: block; }
+
+  /* Big floating record button (FAB) */
+  .fab-record {
+    position: fixed;
+    bottom: 56px;
+    right: 28px;
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 4px solid white;
+    box-shadow: 0 6px 24px rgba(229, 57, 53, 0.55), 0 2px 8px rgba(0,0,0,0.4);
+    cursor: pointer;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, background 0.15s, opacity 0.15s;
+    padding: 0;
+  }
+  .fab-record:hover:not(:disabled) { transform: scale(1.06); background: var(--accent-hover); }
+  .fab-record:active:not(:disabled) { transform: scale(0.97); }
+  .fab-record:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .fab-icon {
+    width: 30px;
+    height: 30px;
+    background: white;
+    border-radius: 50%;
+    transition: all 0.2s;
+    display: block;
+  }
+  .fab-record.recording .fab-icon {
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+  }
+  .fab-record.recording {
+    animation: fab-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes fab-pulse {
+    0%, 100% { box-shadow: 0 6px 24px rgba(229, 57, 53, 0.55), 0 2px 8px rgba(0,0,0,0.4); }
+    50% { box-shadow: 0 6px 36px rgba(229, 57, 53, 0.95), 0 0 0 8px rgba(229,57,53,0.15); }
+  }
+  .fab-label {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    width: 76px;
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-mute);
+    z-index: 90;
+    pointer-events: none;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+
+  /* Footer */
+  .footer-nav {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 24px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    padding: 6px 18px;
+    border-radius: 20px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+    font-size: 0.72rem;
+    z-index: 50;
+  }
+  .footer-nav a { color: var(--text-dim); text-decoration: none; }
+  .footer-nav a:hover { color: var(--accent); }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 20px;
+  }
+  .modal-overlay.on { display: flex; }
+  .modal {
+    background: var(--bg-2);
+    border: 1px solid var(--border-2);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 540px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-2) transparent;
+  }
+  .modal::-webkit-scrollbar { width: 10px; }
+  .modal::-webkit-scrollbar-track { background: transparent; }
+  .modal::-webkit-scrollbar-thumb {
+    background: var(--border-2);
+    border-radius: 5px;
+    border: 2px solid var(--bg-2);
+  }
+  .modal::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+  .modal h2 { font-size: 18px; margin-bottom: 8px; }
+  .modal h3 { font-size: 13px; margin-top: 16px; margin-bottom: 6px; color: var(--accent); }
+  .modal p, .modal li { font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+  .modal ul { padding-left: 20px; }
+  .modal .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    justify-content: flex-end;
+  }
+  .modal kbd {
+    background: var(--bg-3);
+    border: 1px solid var(--border-2);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+
+  /* Webcam preview - draggable overlay */
+  .webcam-preview {
+    position: absolute;
+    pointer-events: auto;
+    z-index: 3;
+    display: none;
+    overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.4);
+    cursor: move;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .webcam-preview:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim), 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .webcam-preview.dragging {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-dim);
+    transition: none;
+  }
+  .webcam-preview.on { display: block; }
+  .webcam-preview video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  .webcam-preview.mirror video { transform: scaleX(-1); }
+  .webcam-preview.circle { border-radius: 50%; }
+  .webcam-preview.rounded { border-radius: 12px; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="brand-dot"></div>
+    <span>Bolo</span>
+    <span class="brand-sub">Record your screen. Speak your mind.</span>
+  </div>
+  <div class="status-pill" id="statusPill">Idle</div>
+  <button class="help-btn" id="helpBtn" title="Help">?</button>
+</header>
+
+<main>
+  <div class="stage" id="stage">
+    <div class="stage-empty" id="stageEmpty">
+      <span class="tag">Nothing leaves your device</span>
+      <h2>Pick your sources to begin</h2>
+      <p>Toggle Screen, Webcam, and Mic on the right. Click them and grant permission — you'll see a live preview here. Hit Record when ready.</p>
+    </div>
+    <video id="previewVideo" autoplay muted playsinline></video>
+    <video id="recordedVideo" controls playsinline></video>
+    <div class="webcam-preview" id="webcamPreview"><video id="webcamVideo" autoplay muted playsinline></video></div>
+    <div class="rec-overlay" id="recOverlay">
+      <div class="rec-dot"></div>
+      <span id="recTimer">00:00</span>
+    </div>
+    <div class="captions-overlay" id="captionsOverlay"></div>
+    <div class="countdown" id="countdown"><div class="countdown-num" id="countdownNum">3</div></div>
+  </div>
+
+  <aside class="sidebar">
+    <!-- Sources panel -->
+    <div class="panel" id="panelSources">
+      <h3>Sources</h3>
+      <div class="source-row">
+        <button class="source-btn" data-src="screen" id="btnScreen">
+          <span class="icon">🖥</span><span>Screen</span>
+        </button>
+        <button class="source-btn" data-src="webcam" id="btnWebcam">
+          <span class="icon">📷</span><span>Webcam</span>
+        </button>
+        <button class="source-btn" data-src="mic" id="btnMic">
+          <span class="icon">🎙</span><span>Mic</span>
+        </button>
+      </div>
+      <div class="field" id="micDeviceField" style="display:none">
+        <label>Microphone</label>
+        <select id="micDevice"></select>
+        <div class="level-meter"><div class="level-fill" id="levelFill"></div></div>
+      </div>
+      <div class="field" id="camDeviceField" style="display:none">
+        <label>Camera</label>
+        <select id="camDevice"></select>
+      </div>
+    </div>
+
+    <!-- Webcam overlay controls -->
+    <div class="panel hidden" id="panelOverlay">
+      <h3>Webcam overlay</h3>
+      <div class="hint" style="margin-bottom:8px">↔ Drag the webcam in the preview to position it. Position is remembered.</div>
+      <div class="field">
+        <label>Size</label>
+        <div class="chip-row" id="sizeChips">
+          <span class="chip on" data-size="s">Small</span>
+          <span class="chip" data-size="m">Medium</span>
+          <span class="chip" data-size="l">Large</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Shape</label>
+        <div class="chip-row" id="shapeChips">
+          <span class="chip" data-shape="square">Square</span>
+          <span class="chip on" data-shape="rounded">Rounded</span>
+          <span class="chip" data-shape="circle">Circle</span>
+        </div>
+      </div>
+      <label class="toggle-row" style="margin-top:6px">
+        <input type="checkbox" id="mirrorToggle" checked>
+        <span>Mirror (flip horizontally)</span>
+      </label>
+    </div>
+
+    <!-- Settings -->
+    <div class="panel" id="panelSettings">
+      <h3>Settings</h3>
+      <div class="field">
+        <label>Resolution</label>
+        <select id="resSelect">
+          <option value="0" selected>Source (auto)</option>
+          <option value="720">720p (HD)</option>
+          <option value="1080">1080p (Full HD)</option>
+          <option value="1440">1440p (2K)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Framerate</label>
+        <select id="fpsSelect">
+          <option value="24">24 fps</option>
+          <option value="30" selected>30 fps</option>
+          <option value="60">60 fps (heavy)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Format</label>
+        <select id="formatSelect">
+          <option value="vp9">WebM / VP9 (best quality)</option>
+          <option value="vp8">WebM / VP8 (wider support)</option>
+          <option value="generic">WebM (auto)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Whisper model</label>
+        <select id="modelSelect">
+          <option value="Xenova/whisper-tiny">Tiny (~40 MB · fastest)</option>
+          <option value="Xenova/whisper-base" selected>Base (~80 MB · balanced)</option>
+          <option value="Xenova/whisper-small">Small (~250 MB · accurate)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Caption language</label>
+        <select id="langSelect">
+          <option value="auto" selected>Auto-detect</option>
+          <option value="english">English</option>
+          <option value="spanish">Spanish</option>
+          <option value="french">French</option>
+          <option value="german">German</option>
+          <option value="italian">Italian</option>
+          <option value="portuguese">Portuguese</option>
+          <option value="dutch">Dutch</option>
+          <option value="russian">Russian</option>
+          <option value="chinese">Chinese</option>
+          <option value="japanese">Japanese</option>
+          <option value="korean">Korean</option>
+          <option value="hindi">Hindi</option>
+          <option value="arabic">Arabic</option>
+          <option value="turkish">Turkish</option>
+        </select>
+      </div>
+      <label class="toggle-row">
+        <input type="checkbox" id="translateToggle">
+        <span>Translate captions to English</span>
+      </label>
+    </div>
+
+    <!-- Actions (post-recording only) -->
+    <div class="panel hidden" id="panelDone">
+      <h3>Recording ready</h3>
+      <div class="actions" id="actionsDone">
+        <button class="btn btn-primary" id="btnTranscribe">✨ Generate Captions</button>
+        <button class="btn" id="btnDownload">↓ Download</button>
+        <button class="btn" id="btnSaveAs">💾 Save As…</button>
+        <button class="btn btn-ghost btn-danger" id="btnDiscard">Start Over</button>
+      </div>
+    </div>
+
+    <!-- Edit (trim + burn-in) -->
+    <div class="panel hidden" id="panelEdit">
+      <h3>Edit <span class="count" id="ffmpegStatus"></span></h3>
+      <div class="trim-bar">
+        <div class="trim-track" id="trimTrack">
+          <div class="trim-range" id="trimRange"></div>
+          <div class="trim-handle" id="trimStart" data-handle="start"></div>
+          <div class="trim-handle" id="trimEnd" data-handle="end"></div>
+        </div>
+        <div class="trim-times">
+          <span id="trimStartTime">00:00.0</span>
+          <span id="trimDuration">00:00.0</span>
+          <span id="trimEndTime">00:00.0</span>
+        </div>
+      </div>
+      <label class="toggle-row" style="margin-top:10px">
+        <input type="checkbox" id="burnInToggle">
+        <span>Burn captions into video (re-encodes, slower)</span>
+      </label>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn btn-primary" id="btnApplyEdit">⚙ Apply edit</button>
+        <button class="btn btn-ghost" id="btnResetTrim">Reset trim</button>
+      </div>
+      <div class="hint" style="margin-top:6px">Trim is lossless and instant. Burn-in re-encodes — expect ~real-time on a modern laptop.</div>
+    </div>
+    <!-- Status / progress -->
+    <div class="panel hidden" id="panelStatus">
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">…</div>
+      </div>
+      <div class="warning" id="warningBox"></div>
+    </div>
+
+    <!-- Recent recordings (session history) -->
+    <div class="panel hidden" id="panelHistory">
+      <h3>Recent recordings <span class="count" id="histCount"></span></h3>
+      <div class="history-list" id="historyList"></div>
+      <div class="hint" style="margin-top:8px">Saved in your browser's private storage (~500 MB cap, oldest auto-evicted). Use Download or Save As to copy them to disk.</div>
+    </div>
+
+    <!-- Transcript -->
+    <div class="panel hidden" id="panelTranscript">
+      <h3>Transcript <span class="count" id="segCount"></span></h3>
+      <label class="toggle-row" style="margin-bottom:8px">
+        <input type="checkbox" id="captionsToggle" checked>
+        <span>Show captions on video</span>
+      </label>
+      <div class="transcript" id="transcriptList"></div>
+      <div class="hint" style="margin-top:10px">
+        Download bundles the .webm and a same-name .srt — VLC, IINA and mpv auto-load it.
+        Permanently burning captions into the pixels needs ffmpeg.wasm — coming in Phase 3.
+      </div>
+      <div class="actions" style="margin-top:8px">
+        <button class="btn" id="btnExportSrt">Export .srt</button>
+        <button class="btn" id="btnExportVtt">Export .vtt</button>
+        <button class="btn" id="btnExportTxt">Export .txt</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- Big circular record FAB -->
+<button class="fab-record" id="fabRecord" disabled aria-label="Start recording" title="Start recording (⌘⇧B)">
+  <span class="fab-icon"></span>
+</button>
+<div class="fab-label" id="fabLabel">Pick a source</div>
+
+<!-- Floating recording bar (in-page fallback when Doc PiP unavailable) -->
+<div class="float-bar" id="floatBar">
+  <div class="rec-dot"></div>
+  <span class="timer" id="floatTimer">00:00</span>
+  <button id="floatPause" title="Pause / Resume (⌘⇧P)">⏸</button>
+  <button class="stop" id="floatStop" title="Stop (⌘⇧R)">■</button>
+  <button id="floatCancel" title="Discard (Esc)">✕</button>
+</div>
+
+<!-- Help modal -->
+<div class="modal-overlay" id="helpModal">
+  <div class="modal">
+    <h2>Bolo — Help</h2>
+    <p><strong>Bolo</strong> records your screen, webcam and mic entirely in-browser. Nothing is uploaded. No account. No server.</p>
+
+    <h3>How to use</h3>
+    <ul>
+      <li>Toggle Screen / Webcam / Mic in the right-hand panel.</li>
+      <li>Grant permission when the browser asks.</li>
+      <li>Adjust webcam position, size and shape if using overlay.</li>
+      <li>Hit <strong>Start Recording</strong>. A 3-2-1 countdown plays, then recording begins.</li>
+      <li>Stop anytime. Review, optionally trim, generate captions, then download.</li>
+    </ul>
+
+    <h3>Keyboard shortcuts</h3>
+    <ul>
+      <li><kbd>⌘⇧B</kbd> / <kbd>Ctrl⇧B</kbd> — Start / stop recording</li>
+      <li><kbd>⌘⇧.</kbd> / <kbd>Ctrl⇧.</kbd> — Pause / resume</li>
+      <li><kbd>Esc</kbd> — Cancel and discard</li>
+    </ul>
+    <p style="font-size:11px; color:var(--text-mute)">Note: <kbd>⌘⇧R</kbd> would conflict with browser hard-reload, so we use <kbd>⌘⇧B</kbd> (B for Bolo).</p>
+
+    <h3>Recording across tabs</h3>
+    <p>When you share another tab, that tab gets focus and Bolo's hotkeys won't fire from it. Two ways to control recording from anywhere:</p>
+    <ul>
+      <li>Bolo opens a small <strong>always-on-top control window</strong> (Picture-in-Picture) when you start recording — pause and stop work from any tab. Chrome 116+.</li>
+      <li>The browser's own "Stop sharing" pill at the bottom of the shared tab also stops Bolo cleanly.</li>
+    </ul>
+
+    <h3>Transcription (Whisper)</h3>
+    <p>After recording, click <strong>Generate Captions</strong>. Whisper runs locally via Transformers.js — the first run downloads ~40 MB of model weights (cached forever). Pick a different model or language in Settings; toggle "Translate to English" to translate from any source language.</p>
+
+    <h3>Editing (trim + burn-in)</h3>
+    <p>Drag the red handles to trim. Click <strong>Apply edit</strong> for a lossless cut (instant) or check <strong>Burn captions into video</strong> first to bake the captions into the pixels (re-encodes — slower but works on YouTube/Twitter/embeds where sidecar SRT doesn't).</p>
+    <p style="font-size:11px; color:var(--text-mute)">Editor uses ffmpeg.wasm — ~25 MB, lazy-loaded in the background while you record so it's ready when you stop.</p>
+
+    <h3>Recordings gallery</h3>
+    <p>Recent recordings live in your browser's private storage (~500 MB cap). They survive reloads. Use Download or Save As to copy them to your real disk.</p>
+
+    <h3>Privacy</h3>
+    <p>Your recording never leaves this page. There is no backend. Close the tab and the recording is gone unless you downloaded it.</p>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="helpClose">Got it</button>
+    </div>
+  </div>
+</div>
+
+<div class="footer-nav">
+  <a href="https://naklitechie.github.io/">⬅ More Projects</a>
+  <a href="https://github.com/NakliTechie/Bolo">⌨ Source</a>
+</div>
+
+<script type="module">
+// ============================================================================
+// Bolo — Browser-Native Screen Recorder
+// ============================================================================
+
+// ---------- State machine ----------
+const STATES = ['idle','configuring','countdown','recording','paused','stopped','transcribing','done','error'];
+const S = {
+  state: 'idle',
+  sources: { screen: false, webcam: false, mic: false },
+  streams: { screen: null, webcam: null, mic: null },
+  combinedStream: null,
+  canvasStream: null,
+  compositor: null, // { canvas, ctx, rafId }
+  overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true },
+  pipWindow: null,
+  devices: { cams: [], mics: [] },
+  settings: {
+    fps: 30,
+    format: 'vp9',
+    maxHeight: 0,                    // 0 = source resolution; otherwise 720/1080/1440
+    whisperModel: 'Xenova/whisper-base',
+    whisperLang: 'auto',             // 'auto' | 'english' | etc
+    whisperTranslate: false,         // translate-to-english
+  },
+  recorder: null,
+  chunks: [],
+  recordedBlob: null,
+  recordedMime: '',
+  recordStartTime: 0,
+  pausedTime: 0,
+  lastPauseAt: 0,
+  timerInterval: null,
+  countdownTimer: null,
+  transcript: null,
+  audioMeter: null, // { ctx, analyser, data, rafId, sourceNode }
+  history: [],          // [{ id, blob, mime, sizeBytes, timestamp, name, transcript }]
+  activeHistoryId: null,
+};
+const HISTORY_MAX = 5;
+
+// ---------- DOM ----------
+const $ = id => document.getElementById(id);
+const statusPill = $('statusPill');
+const stage = $('stage');
+const stageEmpty = $('stageEmpty');
+const previewVideo = $('previewVideo');
+const recordedVideo = $('recordedVideo');
+const webcamPreview = $('webcamPreview');
+const webcamVideo = $('webcamVideo');
+const countdownEl = $('countdown');
+const countdownNum = $('countdownNum');
+const recOverlay = $('recOverlay');
+const recTimer = $('recTimer');
+const floatBar = $('floatBar');
+const floatTimer = $('floatTimer');
+const fabRecord = $('fabRecord');
+const fabLabel = $('fabLabel');
+const panelDone = $('panelDone');
+const panelStatus = $('panelStatus');
+const actionsDone = $('actionsDone');
+const progressWrap = $('progressWrap');
+const progressFill = $('progressFill');
+const progressText = $('progressText');
+const warningBox = $('warningBox');
+const panelOverlay = $('panelOverlay');
+const panelTranscript = $('panelTranscript');
+const transcriptList = $('transcriptList');
+const segCount = $('segCount');
+const micDeviceField = $('micDeviceField');
+const camDeviceField = $('camDeviceField');
+const micDeviceSel = $('micDevice');
+const camDeviceSel = $('camDevice');
+const levelFill = $('levelFill');
+
+// ---------- Utilities ----------
+function setState(next) {
+  S.state = next;
+  statusPill.textContent = next.charAt(0).toUpperCase() + next.slice(1);
+  statusPill.className = 'status-pill';
+  if (next === 'recording') statusPill.classList.add('rec');
+  if (next === 'done' || next === 'stopped') statusPill.classList.add('ok');
+}
+
+// Show or hide the recording-setup panels (Sources / Overlay / Settings).
+// Hidden after a recording is captured so the post-recording panels (Edit /
+// Transcript / History) are visible without scrolling. Restored on Start Over.
+function setSetupPanelsVisible(visible) {
+  $('panelSources').classList.toggle('hidden', !visible);
+  $('panelSettings').classList.toggle('hidden', !visible);
+  if (visible) {
+    // Overlay panel obeys its own condition: only when both screen+webcam are on
+    $('panelOverlay').classList.toggle('hidden', !(S.sources.screen && S.sources.webcam));
+  } else {
+    $('panelOverlay').classList.add('hidden');
+  }
+}
+function fmtTime(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function setProgress(pct, text) {
+  panelStatus.classList.remove('hidden');
+  progressWrap.classList.add('on');
+  progressFill.style.width = `${Math.round(pct*100)}%`;
+  progressText.textContent = text || '';
+}
+function hideProgress() {
+  progressWrap.classList.remove('on');
+  progressFill.style.width = '0%';
+  if (!warningBox.classList.contains('on')) panelStatus.classList.add('hidden');
+}
+function showWarning(msg) {
+  panelStatus.classList.remove('hidden');
+  warningBox.textContent = msg;
+  warningBox.classList.add('on');
+}
+function hideWarning() {
+  warningBox.classList.remove('on');
+  if (!progressWrap.classList.contains('on')) panelStatus.classList.add('hidden');
+}
+
+// Persist webcam overlay layout
+const LS_OVERLAY = 'bolo.overlay.v1';
+function saveOverlay() {
+  try { localStorage.setItem(LS_OVERLAY, JSON.stringify(S.overlay)); } catch(e) {}
+}
+function loadOverlay() {
+  try {
+    const raw = localStorage.getItem(LS_OVERLAY);
+    if (raw) Object.assign(S.overlay, JSON.parse(raw));
+  } catch(e) {}
+}
+// Persist app settings
+const LS_SETTINGS = 'bolo.settings.v1';
+function saveSettings() {
+  try { localStorage.setItem(LS_SETTINGS, JSON.stringify(S.settings)); } catch(e) {}
+}
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(LS_SETTINGS);
+    if (raw) Object.assign(S.settings, JSON.parse(raw));
+  } catch(e) {}
+}
+
+// ---------- Document Picture-in-Picture (cross-tab control) ----------
+// Opens a small always-on-top OS window with timer + pause + stop buttons.
+// Survives tab switches — the user can record another tab and still control Bolo.
+async function openPipControls() {
+  if (!('documentPictureInPicture' in window)) return null;
+  try {
+    const pipWindow = await documentPictureInPicture.requestWindow({
+      width: 280, height: 120,
+    });
+    const css = `
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        background: #0e0e10; color: #ececf1;
+        height: 100vh; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 10px;
+        user-select: none; -webkit-user-select: none;
+      }
+      .row { display: flex; align-items: center; gap: 10px; }
+      .dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #e53935;
+        animation: blink 1.2s infinite;
+      }
+      @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+      .timer {
+        font-size: 22px; font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: #fff;
+      }
+      .label { font-size: 10px; color: #9a9aa6; text-transform: uppercase; letter-spacing: 0.08em; }
+      .btns { display: flex; gap: 12px; }
+      button {
+        background: #1f1f24; border: 1px solid #3a3a42;
+        color: #fff; cursor: pointer;
+        font-size: 16px; font-family: inherit;
+        width: 38px; height: 38px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+      }
+      button:hover { border-color: #e53935; color: #e53935; }
+      button.stop { background: #e53935; border-color: #e53935; color: #fff; }
+      button.stop:hover { background: #f4433c; color: #fff; }
+    `;
+    const styleEl = pipWindow.document.createElement('style');
+    styleEl.textContent = css;
+    pipWindow.document.head.appendChild(styleEl);
+    pipWindow.document.title = 'Bolo — Recording';
+    pipWindow.document.body.innerHTML = `
+      <div class="label">Bolo · recording</div>
+      <div class="row">
+        <div class="dot"></div>
+        <div class="timer" id="pipTimer">00:00</div>
+      </div>
+      <div class="btns">
+        <button id="pipPause" title="Pause / Resume">⏸</button>
+        <button id="pipStop" class="stop" title="Stop">■</button>
+      </div>
+    `;
+    pipWindow.document.getElementById('pipPause').addEventListener('click', togglePause);
+    pipWindow.document.getElementById('pipStop').addEventListener('click', stopRecording);
+    pipWindow.addEventListener('pagehide', () => {
+      // User closed the PiP window manually — fall back to in-page bar if still recording
+      S.pipWindow = null;
+      if (S.state === 'recording' || S.state === 'paused') {
+        floatBar.classList.add('on');
+      }
+    });
+    S.pipWindow = pipWindow;
+    return pipWindow;
+  } catch (e) {
+    console.warn('Document PiP failed', e);
+    S.pipWindow = null;
+    return null;
+  }
+}
+function closePipControls() {
+  if (S.pipWindow && !S.pipWindow.closed) {
+    try { S.pipWindow.close(); } catch(e) {}
+  }
+  S.pipWindow = null;
+}
+
+// ---------- Capture / Devices ----------
+async function enumerateDevices() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    S.devices.cams = devs.filter(d => d.kind === 'videoinput');
+    S.devices.mics = devs.filter(d => d.kind === 'audioinput');
+    camDeviceSel.innerHTML = S.devices.cams.map((d,i) =>
+      `<option value="${d.deviceId}">${d.label || `Camera ${i+1}`}</option>`).join('');
+    micDeviceSel.innerHTML = S.devices.mics.map((d,i) =>
+      `<option value="${d.deviceId}">${d.label || `Microphone ${i+1}`}</option>`).join('');
+  } catch (e) { console.warn('enumerateDevices failed', e); }
+}
+
+async function requestScreen() {
+  try {
+    const videoConstraints = { frameRate: { ideal: S.settings.fps } };
+    if (S.settings.maxHeight > 0) {
+      videoConstraints.height = { ideal: S.settings.maxHeight };
+      videoConstraints.width = { ideal: Math.round(S.settings.maxHeight * 16 / 9) };
+    }
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: videoConstraints,
+      audio: true,
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include'
+    });
+    // Detect if user accidentally picked this tab
+    const track = stream.getVideoTracks()[0];
+    if (track && track.label && document.title && track.label.toLowerCase().includes('bolo')) {
+      track.stop();
+      showWarning('You picked Bolo\'s own tab — that would create a feedback loop. Pick a different window or tab.');
+      return false;
+    }
+    // When user stops sharing via browser UI
+    track.addEventListener('ended', () => {
+      if (S.state === 'recording' || S.state === 'paused') stopRecording();
+      else toggleSource('screen', false);
+    });
+    S.streams.screen = stream;
+    return true;
+  } catch (e) {
+    console.warn('Screen capture failed', e);
+    if (e.name !== 'NotAllowedError') showWarning('Screen capture failed: ' + e.message);
+    return false;
+  }
+}
+
+async function requestWebcam() {
+  try {
+    const deviceId = camDeviceSel.value || undefined;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    S.streams.webcam = stream;
+    webcamVideo.srcObject = stream;
+    await enumerateDevices();
+    return true;
+  } catch (e) {
+    console.warn('Webcam failed', e);
+    showWarning('Webcam error: ' + e.message);
+    return false;
+  }
+}
+
+async function requestMic() {
+  try {
+    const deviceId = micDeviceSel.value || undefined;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: true, noiseSuppression: true }
+    });
+    S.streams.mic = stream;
+    await enumerateDevices();
+    startAudioMeter(stream);
+    return true;
+  } catch (e) {
+    console.warn('Mic failed', e);
+    showWarning('Mic error: ' + e.message);
+    return false;
+  }
+}
+
+function stopStream(stream) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+}
+
+function stopAudioMeter() {
+  if (!S.audioMeter) return;
+  cancelAnimationFrame(S.audioMeter.rafId);
+  try { S.audioMeter.ctx.close(); } catch(e){}
+  S.audioMeter = null;
+  levelFill.style.width = '0%';
+}
+function startAudioMeter(stream) {
+  stopAudioMeter();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 256;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const tick = () => {
+    if (!S.audioMeter) return;
+    analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    const avg = sum / data.length;
+    levelFill.style.width = `${Math.min(100, (avg / 128) * 100)}%`;
+    S.audioMeter.rafId = requestAnimationFrame(tick);
+  };
+  S.audioMeter = { ctx, analyser, data, sourceNode: source, rafId: 0 };
+  tick();
+}
+
+// ---------- Source toggles ----------
+async function toggleSource(kind, forceOn) {
+  hideWarning();
+  const currentlyOn = S.sources[kind];
+  const wantOn = forceOn === undefined ? !currentlyOn : forceOn;
+
+  if (wantOn && !currentlyOn) {
+    let ok = false;
+    if (kind === 'screen') ok = await requestScreen();
+    if (kind === 'webcam') ok = await requestWebcam();
+    if (kind === 'mic') ok = await requestMic();
+    if (!ok) return;
+    S.sources[kind] = true;
+  } else if (!wantOn && currentlyOn) {
+    if (kind === 'screen') { stopStream(S.streams.screen); S.streams.screen = null; }
+    if (kind === 'webcam') { stopStream(S.streams.webcam); S.streams.webcam = null; webcamVideo.srcObject = null; }
+    if (kind === 'mic') { stopStream(S.streams.mic); S.streams.mic = null; stopAudioMeter(); }
+    S.sources[kind] = false;
+  }
+
+  // Update UI
+  document.querySelector(`[data-src="${kind}"]`).classList.toggle('on', S.sources[kind]);
+  micDeviceField.style.display = S.sources.mic ? '' : 'none';
+  camDeviceField.style.display = S.sources.webcam ? '' : 'none';
+  panelOverlay.classList.toggle('hidden', !(S.sources.screen && S.sources.webcam));
+
+  updatePreview();
+  updateRecordButton();
+}
+
+function updateRecordButton() {
+  const hasVisual = S.sources.screen || S.sources.webcam;
+  const isLive = S.state === 'recording' || S.state === 'paused';
+  fabRecord.disabled = !hasVisual && !isLive;
+  if (isLive) {
+    fabRecord.classList.add('recording');
+    fabLabel.textContent = S.state === 'paused' ? 'Paused — click to stop' : 'Click to stop';
+    fabRecord.setAttribute('aria-label', 'Stop recording');
+    fabRecord.title = 'Stop recording (⌘⇧B)';
+  } else {
+    fabRecord.classList.remove('recording');
+    fabLabel.textContent = hasVisual ? 'Click to record' : 'Pick a source';
+    fabRecord.setAttribute('aria-label', 'Start recording');
+    fabRecord.title = 'Start recording (⌘⇧B)';
+  }
+}
+
+// ---------- Preview compositing ----------
+function updatePreview() {
+  // Don't clobber the recorded video display when we're in done/stopped state.
+  // The user must click "Start Over" to return to the live preview.
+  if ((S.state === 'done' || S.state === 'stopped' || S.state === 'transcribing') && S.recordedBlob) {
+    return;
+  }
+
+  // Stop existing compositor
+  if (S.compositor) {
+    cancelAnimationFrame(S.compositor.rafId);
+    S.compositor = null;
+  }
+
+  const hasScreen = !!S.streams.screen;
+  const hasWebcam = !!S.streams.webcam;
+
+  if (!hasScreen && !hasWebcam) {
+    previewVideo.srcObject = null;
+    previewVideo.classList.remove('on');
+    stageEmpty.style.display = '';
+    webcamPreview.classList.remove('on');
+    return;
+  }
+  stageEmpty.style.display = 'none';
+  recordedVideo.classList.remove('on');
+
+  if (hasScreen && hasWebcam) {
+    // Composite both via canvas
+    previewVideo.srcObject = S.streams.screen;
+    previewVideo.classList.add('on');
+    webcamPreview.classList.remove('on'); // we draw it in canvas later for recording; for preview, overlay is CSS
+    // Use CSS-overlaid webcam preview for performance during config stage
+    showWebcamCssPreview();
+  } else if (hasScreen) {
+    previewVideo.srcObject = S.streams.screen;
+    previewVideo.classList.add('on');
+    webcamPreview.classList.remove('on');
+  } else if (hasWebcam) {
+    previewVideo.srcObject = S.streams.webcam;
+    previewVideo.classList.add('on');
+    webcamPreview.classList.remove('on');
+  }
+}
+
+function showWebcamCssPreview() {
+  webcamPreview.classList.add('on');
+  webcamPreview.classList.toggle('mirror', S.overlay.mirror);
+  webcamPreview.classList.toggle('circle', S.overlay.shape === 'circle');
+  webcamPreview.classList.toggle('rounded', S.overlay.shape === 'rounded');
+  // Size as % of stage width
+  const sizeMap = { s: 15, m: 25, l: 35 };
+  const pct = sizeMap[S.overlay.size];
+  webcamPreview.style.width = pct + '%';
+  webcamPreview.style.aspectRatio = (S.overlay.shape === 'circle') ? '1/1' : '16/9';
+  webcamPreview.style.height = 'auto';
+  webcamPreview.style.right = 'auto';
+  webcamPreview.style.bottom = 'auto';
+  // Center the webcam at (x%, y%) of the stage
+  webcamPreview.style.left = `calc(${S.overlay.x}% - ${pct/2}%)`;
+  // For top: use a CSS hack — translateY based on aspect; simpler: compute via JS at next frame
+  webcamPreview.style.top = `${S.overlay.y}%`;
+  webcamPreview.style.transform = 'translateY(-50%)';
+}
+
+// Make the webcam preview draggable to position it freely.
+function attachWebcamDrag() {
+  let dragging = false;
+  let stageRect = null;
+  let offX = 0, offY = 0;
+  const onDown = (e) => {
+    if (!webcamPreview.classList.contains('on')) return;
+    e.preventDefault();
+    dragging = true;
+    stageRect = stage.getBoundingClientRect();
+    const r = webcamPreview.getBoundingClientRect();
+    const t = (e.touches ? e.touches[0] : e);
+    offX = t.clientX - (r.left + r.width / 2);
+    offY = t.clientY - (r.top + r.height / 2);
+    webcamPreview.classList.add('dragging');
+  };
+  const onMove = (e) => {
+    if (!dragging || !stageRect) return;
+    e.preventDefault();
+    const t = (e.touches ? e.touches[0] : e);
+    const cx = t.clientX - offX - stageRect.left;
+    const cy = t.clientY - offY - stageRect.top;
+    let xPct = (cx / stageRect.width) * 100;
+    let yPct = (cy / stageRect.height) * 100;
+    // Clamp so the webcam stays inside the stage
+    const sizeMap = { s: 15, m: 25, l: 35 };
+    const halfW = sizeMap[S.overlay.size] / 2;
+    const r2 = webcamPreview.getBoundingClientRect();
+    const halfHpct = (r2.height / stageRect.height) * 50;
+    xPct = Math.max(halfW, Math.min(100 - halfW, xPct));
+    yPct = Math.max(halfHpct, Math.min(100 - halfHpct, yPct));
+    S.overlay.x = xPct;
+    S.overlay.y = yPct;
+    showWebcamCssPreview();
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    webcamPreview.classList.remove('dragging');
+    saveOverlay();
+  };
+  webcamPreview.addEventListener('mousedown', onDown);
+  webcamPreview.addEventListener('touchstart', onDown, { passive: false });
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchend', onUp);
+}
+
+// ---------- Canvas compositor for recording ----------
+function buildCompositeStream() {
+  // If both screen+webcam: composite via canvas. Otherwise pass through the appropriate stream.
+  const hasScreen = !!S.streams.screen;
+  const hasWebcam = !!S.streams.webcam;
+
+  let videoTracks = [];
+
+  if (hasScreen && hasWebcam) {
+    // Create offscreen canvas sized to screen track's settings
+    const st = S.streams.screen.getVideoTracks()[0].getSettings();
+    const W = st.width || 1920;
+    const H = st.height || 1080;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    // Build hidden video elements to drive the canvas
+    const screenVid = document.createElement('video');
+    screenVid.srcObject = S.streams.screen;
+    screenVid.muted = true; screenVid.playsInline = true;
+    screenVid.play();
+    const webcamVid = document.createElement('video');
+    webcamVid.srcObject = S.streams.webcam;
+    webcamVid.muted = true; webcamVid.playsInline = true;
+    webcamVid.play();
+
+    const sizeMap = { s: 0.15, m: 0.25, l: 0.35 };
+    const pct = sizeMap[S.overlay.size];
+
+    const draw = () => {
+      if (!S.compositor) return;
+      try {
+        ctx.drawImage(screenVid, 0, 0, W, H);
+        const ww = Math.floor(W * pct);
+        const wh = (S.overlay.shape === 'circle') ? ww : Math.floor(ww * (9/16));
+        // Center the webcam at (x%, y%) of the canvas, then clamp inside.
+        let wx = Math.floor((S.overlay.x / 100) * W - ww / 2);
+        let wy = Math.floor((S.overlay.y / 100) * H - wh / 2);
+        wx = Math.max(0, Math.min(W - ww, wx));
+        wy = Math.max(0, Math.min(H - wh, wy));
+
+        ctx.save();
+        // Clip for rounded/circle
+        if (S.overlay.shape === 'circle') {
+          const r = Math.min(ww, wh) / 2;
+          const cx = wx + ww/2, cy = wy + wh/2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI*2);
+          ctx.clip();
+        } else if (S.overlay.shape === 'rounded') {
+          const r = Math.min(ww, wh) * 0.1;
+          ctx.beginPath();
+          ctx.moveTo(wx+r, wy);
+          ctx.arcTo(wx+ww, wy, wx+ww, wy+wh, r);
+          ctx.arcTo(wx+ww, wy+wh, wx, wy+wh, r);
+          ctx.arcTo(wx, wy+wh, wx, wy, r);
+          ctx.arcTo(wx, wy, wx+ww, wy, r);
+          ctx.closePath();
+          ctx.clip();
+        }
+        if (S.overlay.mirror) {
+          ctx.translate(wx+ww, wy);
+          ctx.scale(-1, 1);
+          ctx.drawImage(webcamVid, 0, 0, ww, wh);
+        } else {
+          ctx.drawImage(webcamVid, wx, wy, ww, wh);
+        }
+        ctx.restore();
+      } catch(e) {}
+      S.compositor.rafId = requestAnimationFrame(draw);
+    };
+    S.compositor = { canvas, ctx, rafId: 0, screenVid, webcamVid };
+    draw();
+    const cs = canvas.captureStream(S.settings.fps);
+    S.canvasStream = cs;
+    videoTracks = cs.getVideoTracks();
+  } else if (hasScreen) {
+    videoTracks = S.streams.screen.getVideoTracks();
+  } else if (hasWebcam) {
+    videoTracks = S.streams.webcam.getVideoTracks();
+  }
+
+  // Audio: mix mic + screen audio (if any)
+  const audioTracks = [];
+  if (S.streams.mic) audioTracks.push(...S.streams.mic.getAudioTracks());
+  if (S.streams.screen) audioTracks.push(...S.streams.screen.getAudioTracks());
+
+  return new MediaStream([...videoTracks, ...audioTracks]);
+}
+
+// ---------- Recording ----------
+function pickMimeType() {
+  const cands = {
+    vp9: ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm'],
+    vp8: ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm'],
+    generic: ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+  };
+  for (const m of cands[S.settings.format]) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return 'video/webm';
+}
+
+async function startRecording() {
+  if (S.state !== 'idle' && S.state !== 'configuring' && S.state !== 'done') return;
+  if (!S.sources.screen && !S.sources.webcam) return;
+
+  hideWarning();
+
+  // Open the Document PiP control window NOW while we still have user activation.
+  // This is what lets the user pause/stop from any tab — the PiP window stays on top.
+  await openPipControls();
+
+  setState('countdown');
+  fabRecord.disabled = true;
+
+  // 3-2-1 countdown
+  countdownEl.classList.add('on');
+  let n = 3;
+  countdownNum.textContent = n;
+  await new Promise(resolve => {
+    S.countdownTimer = setInterval(() => {
+      n--;
+      if (n <= 0) {
+        clearInterval(S.countdownTimer);
+        countdownEl.classList.remove('on');
+        resolve();
+      } else {
+        countdownNum.textContent = n;
+        // Retrigger animation
+        countdownNum.style.animation = 'none';
+        void countdownNum.offsetWidth;
+        countdownNum.style.animation = '';
+      }
+    }, 1000);
+  });
+
+  // Build composite stream
+  try {
+    S.combinedStream = buildCompositeStream();
+  } catch (e) {
+    showWarning('Failed to build composite stream: ' + e.message);
+    setState('idle');
+    closePipControls();
+    updateRecordButton();
+    return;
+  }
+
+  const mime = pickMimeType();
+  S.recordedMime = mime;
+  try {
+    S.recorder = new MediaRecorder(S.combinedStream, { mimeType: mime });
+  } catch (e) {
+    showWarning('MediaRecorder init failed: ' + e.message);
+    setState('idle');
+    closePipControls();
+    updateRecordButton();
+    return;
+  }
+  S.chunks = [];
+  S.recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) S.chunks.push(ev.data); };
+  S.recorder.onstop = onRecorderStopped;
+  S.recorder.onerror = ev => { console.error('Recorder error', ev); showWarning('Recorder error.'); };
+
+  S.recorder.start(1000);
+  S.recordStartTime = Date.now();
+  S.pausedTime = 0;
+  setState('recording');
+  fabRecord.disabled = false;
+  updateRecordButton();
+  recOverlay.classList.add('on');
+  // Show in-page float bar only if there's no PiP window
+  if (!S.pipWindow) floatBar.classList.add('on');
+  S.timerInterval = setInterval(updateTimer, 250);
+  updateTimer();
+  // Spec §7: background-prefetch ffmpeg.wasm. Most recordings outlast the load,
+  // so by the time the user finishes, the editor is ready instantly.
+  prefetchFfmpeg();
+}
+
+function updateTimer() {
+  let elapsed = Date.now() - S.recordStartTime - S.pausedTime;
+  if (S.state === 'paused') elapsed -= (Date.now() - S.lastPauseAt);
+  const t = fmtTime(elapsed);
+  recTimer.textContent = t;
+  floatTimer.textContent = t;
+  // Mirror to PiP window if open
+  if (S.pipWindow && !S.pipWindow.closed) {
+    const pt = S.pipWindow.document.getElementById('pipTimer');
+    if (pt) pt.textContent = t;
+  }
+  // Warn past 30min
+  if (elapsed > 30*60*1000 && !warningBox.classList.contains('on')) {
+    showWarning('Recording over 30 minutes. Long recordings may become unstable — consider stopping soon.');
+  }
+}
+
+function pauseRecording() {
+  if (S.state !== 'recording') return;
+  S.recorder.pause();
+  S.lastPauseAt = Date.now();
+  setState('paused');
+  $('floatPause').textContent = '▶';
+  if (S.pipWindow && !S.pipWindow.closed) {
+    const pp = S.pipWindow.document.getElementById('pipPause');
+    if (pp) pp.textContent = '▶';
+  }
+  updateRecordButton();
+}
+function resumeRecording() {
+  if (S.state !== 'paused') return;
+  S.recorder.resume();
+  S.pausedTime += Date.now() - S.lastPauseAt;
+  setState('recording');
+  $('floatPause').textContent = '⏸';
+  if (S.pipWindow && !S.pipWindow.closed) {
+    const pp = S.pipWindow.document.getElementById('pipPause');
+    if (pp) pp.textContent = '⏸';
+  }
+  updateRecordButton();
+}
+function togglePause() {
+  if (S.state === 'recording') pauseRecording();
+  else if (S.state === 'paused') resumeRecording();
+}
+
+function stopRecording() {
+  if (S.state !== 'recording' && S.state !== 'paused') return;
+  setState('stopped');
+  try { S.recorder.stop(); } catch(e) {}
+  if (S.timerInterval) { clearInterval(S.timerInterval); S.timerInterval = null; }
+  recOverlay.classList.remove('on');
+  floatBar.classList.remove('on');
+  $('floatPause').textContent = '⏸';
+  closePipControls();
+  updateRecordButton();
+  // Try to bring Bolo's tab back to focus so the user sees the result
+  try { window.focus(); } catch(e) {}
+}
+
+function cancelRecording() {
+  if (S.state === 'recording' || S.state === 'paused') {
+    try { S.recorder.stop(); } catch(e) {}
+    S.chunks = [];
+  }
+  if (S.timerInterval) { clearInterval(S.timerInterval); S.timerInterval = null; }
+  recOverlay.classList.remove('on');
+  floatBar.classList.remove('on');
+  closePipControls();
+  if (S.compositor) { cancelAnimationFrame(S.compositor.rafId); S.compositor = null; }
+  S.recordedBlob = null;
+  resetToIdle();
+}
+
+function onRecorderStopped() {
+  if (S.chunks.length === 0) { resetToIdle(); return; }
+  S.recordedBlob = new Blob(S.chunks, { type: S.recordedMime });
+  // Stop canvas compositor now that we've captured everything
+  if (S.compositor) { cancelAnimationFrame(S.compositor.rafId); S.compositor = null; }
+  // Save into session history
+  pushHistory(S.recordedBlob, S.recordedMime);
+  // Show recorded playback
+  previewVideo.classList.remove('on');
+  webcamPreview.classList.remove('on');
+  if (recordedVideo.src) URL.revokeObjectURL(recordedVideo.src);
+  recordedVideo.src = URL.createObjectURL(S.recordedBlob);
+  recordedVideo.classList.add('on');
+  panelDone.classList.remove('hidden');
+  showEditPanel();
+  setSetupPanelsVisible(false);   // collapse setup panels — Edit/Transcript/History bubble up
+  // Persist to OPFS in the background (non-blocking)
+  if (S.activeHistoryId) {
+    const active = S.history.find(h => h.id === S.activeHistoryId);
+    if (active) opfsSave(active).catch(e => console.warn('OPFS save failed', e));
+  }
+  setState('done');
+  updateRecordButton();
+}
+
+function resetToIdle() {
+  // Note: history is preserved. Only the active playback is unloaded.
+  // Reset bundled-download labels to their default
+  $('btnDownload').textContent = '↓ Download';
+  $('btnSaveAs').textContent = '💾 Save As…';
+  S.recordedBlob = null;
+  S.chunks = [];
+  S.activeHistoryId = null;
+  if (recordedVideo.src) { URL.revokeObjectURL(recordedVideo.src); recordedVideo.src = ''; }
+  recordedVideo.classList.remove('on');
+  panelDone.classList.add('hidden');
+  $('panelEdit').classList.add('hidden');
+  panelTranscript.classList.add('hidden');
+  S.transcript = null;
+  captionsOverlay.textContent = '';
+  captionsOverlay.classList.remove('on');
+  hideProgress();
+  hideWarning();
+  setState(S.sources.screen || S.sources.webcam || S.sources.mic ? 'configuring' : 'idle');
+  setSetupPanelsVisible(true);    // bring back Sources / Overlay (if both on) / Settings
+  updatePreview();
+  updateRecordButton();
+  renderHistory();
+}
+
+// ---------- ffmpeg.wasm (lazy-loaded, single-threaded core for GitHub Pages) ----------
+// Per spec §7: background prefetch when recording starts. Falls back gracefully.
+let ffmpegInstance = null;
+let ffmpegFetchFile = null;
+let ffmpegLoading = null;
+async function loadFfmpeg(onProgress) {
+  if (ffmpegInstance) return ffmpegInstance;
+  if (ffmpegLoading) return ffmpegLoading;
+  ffmpegLoading = (async () => {
+    try {
+      // Single-threaded core needs no SharedArrayBuffer / COOP / COEP headers.
+      const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
+      const util = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/+esm');
+      ffmpegFetchFile = util.fetchFile;
+      const coreBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
+      // ffmpeg.wasm internally spawns its own wrapper Worker. The default URL is
+      // resolved relative to the CDN, which trips cross-origin Worker construction
+      // from any non-jsdelivr page (file://, localhost, github.io, ...). Fix by
+      // fetching the worker JS and handing ffmpeg a same-origin blob URL for it.
+      const classWorkerURL = await util.toBlobURL(
+        'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
+        'text/javascript'
+      );
+      const ff = new FFmpeg();
+      ff.on('progress', ({ progress }) => {
+        if (onProgress && progress >= 0 && progress <= 1) onProgress(progress);
+      });
+      ff.on('log', ({ message }) => {
+        // Uncomment for debugging
+        // console.log('[ffmpeg]', message);
+      });
+      await ff.load({
+        coreURL: await util.toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await util.toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
+        classWorkerURL,
+      });
+      ffmpegInstance = ff;
+      return ff;
+    } catch (e) {
+      console.error('ffmpeg load failed', e);
+      ffmpegLoading = null;
+      throw e;
+    }
+  })();
+  return ffmpegLoading;
+}
+function ffmpegReady() { return !!ffmpegInstance; }
+// Fire-and-forget background prefetch — called when recording starts
+function prefetchFfmpeg() {
+  if (ffmpegInstance || ffmpegLoading) return;
+  loadFfmpeg().catch(() => { /* swallow — we'll retry on first edit click */ });
+}
+
+// ---------- Trim UI (drives ffmpeg edit pipeline) ----------
+const trimState = { duration: 0, startSec: 0, endSec: 0 };
+function fmtTimeFine(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = sec - m * 60;
+  return `${String(m).padStart(2,'0')}:${s.toFixed(1).padStart(4,'0')}`;
+}
+function updateTrimUI() {
+  const d = trimState.duration || 1;
+  const sPct = (trimState.startSec / d) * 100;
+  const ePct = (trimState.endSec / d) * 100;
+  $('trimStart').style.left = sPct + '%';
+  $('trimEnd').style.left = ePct + '%';
+  $('trimRange').style.left = sPct + '%';
+  $('trimRange').style.right = (100 - ePct) + '%';
+  $('trimStartTime').textContent = fmtTimeFine(trimState.startSec);
+  $('trimEndTime').textContent = fmtTimeFine(trimState.endSec);
+  $('trimDuration').textContent = fmtTimeFine(trimState.endSec - trimState.startSec);
+}
+function resetTrim() {
+  trimState.startSec = 0;
+  trimState.endSec = trimState.duration;
+  updateTrimUI();
+}
+function attachTrimHandlers() {
+  let dragging = null;
+  const track = $('trimTrack');
+  const onDown = (e) => {
+    const target = e.target.closest('.trim-handle');
+    if (!target) return;
+    e.preventDefault();
+    dragging = target.dataset.handle;
+  };
+  const onMove = (e) => {
+    if (!dragging) return;
+    const r = track.getBoundingClientRect();
+    const t = (e.touches ? e.touches[0] : e);
+    let pct = (t.clientX - r.left) / r.width;
+    pct = Math.max(0, Math.min(1, pct));
+    const sec = pct * trimState.duration;
+    if (dragging === 'start') {
+      trimState.startSec = Math.min(sec, trimState.endSec - 0.1);
+      recordedVideo.currentTime = trimState.startSec;
+    } else {
+      trimState.endSec = Math.max(sec, trimState.startSec + 0.1);
+      recordedVideo.currentTime = trimState.endSec;
+    }
+    updateTrimUI();
+  };
+  const onUp = () => { dragging = null; };
+  track.addEventListener('mousedown', onDown);
+  track.addEventListener('touchstart', onDown, { passive: false });
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchend', onUp);
+}
+function showEditPanel() {
+  $('panelEdit').classList.remove('hidden');
+  // Wait for video metadata for accurate duration
+  const setDur = () => {
+    let d = recordedVideo.duration;
+    // WebM blobs from MediaRecorder often report Infinity until you seek to the end.
+    // Fallback: probe by seeking past the end.
+    if (!isFinite(d) || d <= 0) {
+      recordedVideo.currentTime = 1e9;
+      const fix = () => {
+        d = recordedVideo.duration;
+        recordedVideo.currentTime = 0;
+        recordedVideo.removeEventListener('timeupdate', fix);
+        if (isFinite(d) && d > 0) {
+          trimState.duration = d;
+          resetTrim();
+        }
+      };
+      recordedVideo.addEventListener('timeupdate', fix);
+      return;
+    }
+    trimState.duration = d;
+    resetTrim();
+  };
+  if (recordedVideo.readyState >= 1) setDur();
+  else recordedVideo.addEventListener('loadedmetadata', setDur, { once: true });
+  // Reflect ffmpeg load state
+  if (ffmpegInstance) $('ffmpegStatus').textContent = '· editor ready';
+  else if (ffmpegLoading) $('ffmpegStatus').textContent = '· loading editor…';
+  else $('ffmpegStatus').textContent = '';
+}
+
+// Run the chosen edit through ffmpeg.wasm. Trim is lossless (-c copy);
+// burn-in re-encodes (subtitles filter requires it).
+async function applyEdit() {
+  if (!S.recordedBlob) return;
+  const start = trimState.startSec;
+  const end = trimState.endSec;
+  const wantBurn = $('burnInToggle').checked && S.transcript && S.transcript.length;
+  const isTrim = (start > 0.05) || (end < trimState.duration - 0.05);
+  if (!isTrim && !wantBurn) {
+    showWarning('Nothing to apply — pick a trim range or enable burn-in.');
+    return;
+  }
+  try {
+    setProgress(0, 'Loading editor (ffmpeg.wasm)…');
+    const ff = await loadFfmpeg(p => setProgress(0.2 + p * 0.7, wantBurn ? 'Re-encoding (burn-in)…' : 'Trimming…'));
+    $('ffmpegStatus').textContent = '· editor ready';
+    setProgress(0.15, 'Writing input…');
+    await ff.writeFile('in.webm', await ffmpegFetchFile(S.recordedBlob));
+    let outName = 'out.webm';
+    if (wantBurn) {
+      // Burn-in path: write the SRT, run subtitles filter, re-encode video, copy audio.
+      await ff.writeFile('subs.srt', new TextEncoder().encode(toSrt()));
+      const args = [];
+      if (isTrim) args.push('-ss', String(start), '-to', String(end));
+      args.push('-i', 'in.webm');
+      args.push('-vf', 'subtitles=subs.srt');
+      args.push('-c:v', 'libvpx', '-b:v', '2M');
+      args.push('-c:a', 'copy');
+      args.push(outName);
+      setProgress(0.25, 'Re-encoding with captions burned in…');
+      await ff.exec(args);
+    } else {
+      // Lossless trim — stream copy
+      const args = [];
+      args.push('-ss', String(start), '-to', String(end));
+      args.push('-i', 'in.webm');
+      args.push('-c', 'copy');
+      args.push(outName);
+      setProgress(0.5, 'Trimming (lossless stream copy)…');
+      await ff.exec(args);
+    }
+    setProgress(0.95, 'Reading output…');
+    const data = await ff.readFile(outName);
+    const newBlob = new Blob([data.buffer], { type: 'video/webm' });
+    // Replace the active recording with the edited one (and history entry too)
+    if (S.activeHistoryId) {
+      const active = S.history.find(h => h.id === S.activeHistoryId);
+      if (active) {
+        active.blob = newBlob;
+        active.sizeBytes = newBlob.size;
+        active.name = active.name.replace(/\.webm$/, wantBurn ? '-captioned.webm' : '-trimmed.webm');
+        renderHistory();
+        opfsSave(active).catch(() => {});
+      }
+    }
+    S.recordedBlob = newBlob;
+    if (recordedVideo.src) URL.revokeObjectURL(recordedVideo.src);
+    recordedVideo.src = URL.createObjectURL(newBlob);
+    // Reset trim state to the new duration
+    trimState.duration = end - start;
+    trimState.startSec = 0;
+    trimState.endSec = trimState.duration;
+    updateTrimUI();
+    setProgress(1, 'Done.');
+    setTimeout(hideProgress, 800);
+    // Clean up ffmpeg FS
+    try { await ff.deleteFile('in.webm'); } catch(e) {}
+    try { await ff.deleteFile(outName); } catch(e) {}
+    try { if (wantBurn) await ff.deleteFile('subs.srt'); } catch(e) {}
+  } catch (e) {
+    console.error('Edit failed', e);
+    showWarning('Edit failed: ' + (e.message || e));
+    hideProgress();
+  }
+}
+
+// ---------- Session history ----------
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+function pushHistory(blob, mime) {
+  const item = {
+    id: 'rec_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    blob,
+    mime,
+    sizeBytes: blob.size,
+    timestamp: new Date().toISOString(),
+    name: filenameBase() + '.webm',
+    transcript: null,
+  };
+  S.history.unshift(item);
+  S.activeHistoryId = item.id;
+  while (S.history.length > HISTORY_MAX) S.history.pop();
+  renderHistory();
+}
+function renderHistory() {
+  const panel = $('panelHistory');
+  if (S.history.length === 0) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  $('histCount').textContent = `${S.history.length} of ${HISTORY_MAX}`;
+  $('historyList').innerHTML = S.history.map(h => `
+    <div class="hist-item ${h.id === S.activeHistoryId ? 'active' : ''}" data-id="${h.id}">
+      <div class="hist-info">
+        <div class="hist-name">${escapeHtml(h.name)}</div>
+        <div class="hist-meta">${formatBytes(h.sizeBytes)} · ${new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${h.transcript ? ' · captions' : ''}</div>
+      </div>
+      <button class="hist-btn" data-act="load" data-id="${h.id}" title="Open">▶</button>
+      <button class="hist-btn" data-act="dl" data-id="${h.id}" title="Download">↓</button>
+      <button class="hist-btn" data-act="del" data-id="${h.id}" title="Delete">✕</button>
+    </div>
+  `).join('');
+}
+function loadHistoryItem(id) {
+  const item = S.history.find(h => h.id === id);
+  if (!item) return;
+  S.recordedBlob = item.blob;
+  S.recordedMime = item.mime;
+  S.activeHistoryId = item.id;
+  if (recordedVideo.src) URL.revokeObjectURL(recordedVideo.src);
+  recordedVideo.src = URL.createObjectURL(item.blob);
+  recordedVideo.classList.add('on');
+  previewVideo.classList.remove('on');
+  webcamPreview.classList.remove('on');
+  panelDone.classList.remove('hidden');
+  showEditPanel();
+  setSetupPanelsVisible(false);
+  S.transcript = item.transcript ? JSON.parse(JSON.stringify(item.transcript)) : null;
+  if (S.transcript) {
+    renderTranscript();
+    panelTranscript.classList.remove('hidden');
+    $('btnTranscribe').textContent = '✨ Re-transcribe';
+  } else {
+    panelTranscript.classList.add('hidden');
+    $('btnTranscribe').textContent = '✨ Generate Captions';
+    $('btnDownload').textContent = '↓ Download';
+    $('btnSaveAs').textContent = '💾 Save As…';
+  }
+  setState('done');
+  updateRecordButton();
+  renderHistory();
+}
+function deleteHistoryItem(id) {
+  const idx = S.history.findIndex(h => h.id === id);
+  if (idx < 0) return;
+  // If we're deleting the active item, also clear playback
+  if (S.history[idx].id === S.activeHistoryId) {
+    if (recordedVideo.src) { URL.revokeObjectURL(recordedVideo.src); recordedVideo.src = ''; }
+    recordedVideo.classList.remove('on');
+    S.recordedBlob = null;
+    S.activeHistoryId = null;
+    S.transcript = null;
+    panelDone.classList.add('hidden');
+    panelTranscript.classList.add('hidden');
+    captionsOverlay.textContent = '';
+    captionsOverlay.classList.remove('on');
+    setState(S.sources.screen || S.sources.webcam || S.sources.mic ? 'configuring' : 'idle');
+    updatePreview();
+    updateRecordButton();
+  }
+  S.history.splice(idx, 1);
+  renderHistory();
+  // Drop from disk too
+  opfsDelete(id).catch(() => {});
+}
+
+// ---------- OPFS gallery (persistent history) ----------
+// Browser-private filesystem; survives reloads. 500 MB cap with FIFO eviction.
+const OPFS_DIR = 'bolo-gallery';
+const OPFS_CAP = 500 * 1024 * 1024;
+async function opfsRoot() {
+  if (!('storage' in navigator) || !navigator.storage.getDirectory) return null;
+  try { return await navigator.storage.getDirectory(); } catch(e) { return null; }
+}
+async function opfsDir() {
+  const root = await opfsRoot();
+  if (!root) return null;
+  return await root.getDirectoryHandle(OPFS_DIR, { create: true });
+}
+async function opfsSave(item) {
+  const dir = await opfsDir();
+  if (!dir) return false;
+  // Write blob
+  const fh = await dir.getFileHandle(item.id + '.webm', { create: true });
+  const w = await fh.createWritable();
+  await w.write(item.blob);
+  await w.close();
+  // Write metadata
+  const mh = await dir.getFileHandle(item.id + '.json', { create: true });
+  const mw = await mh.createWritable();
+  await mw.write(JSON.stringify({
+    id: item.id,
+    name: item.name,
+    timestamp: item.timestamp,
+    sizeBytes: item.sizeBytes,
+    transcript: item.transcript,
+    mime: item.mime,
+  }));
+  await mw.close();
+  item.persisted = true;
+  await opfsEnforceQuota();
+  renderHistory();
+  return true;
+}
+async function opfsLoadAll() {
+  const dir = await opfsDir();
+  if (!dir) return [];
+  const items = [];
+  for await (const entry of dir.values()) {
+    if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+      try {
+        const file = await entry.getFile();
+        const meta = JSON.parse(await file.text());
+        const blobHandle = await dir.getFileHandle(meta.id + '.webm');
+        const blobFile = await blobHandle.getFile();
+        const blob = new Blob([await blobFile.arrayBuffer()], { type: meta.mime || 'video/webm' });
+        items.push({ ...meta, blob, persisted: true });
+      } catch (e) { /* skip orphans */ }
+    }
+  }
+  return items.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+async function opfsDelete(id) {
+  const dir = await opfsDir();
+  if (!dir) return;
+  try { await dir.removeEntry(id + '.webm'); } catch(e) {}
+  try { await dir.removeEntry(id + '.json'); } catch(e) {}
+}
+async function opfsEnforceQuota() {
+  const dir = await opfsDir();
+  if (!dir) return;
+  // Tally on-disk size
+  const files = [];
+  for await (const entry of dir.values()) {
+    if (entry.kind === 'file' && entry.name.endsWith('.webm')) {
+      const f = await entry.getFile();
+      files.push({ name: entry.name, id: entry.name.replace(/\.webm$/, ''), size: f.size, lastModified: f.lastModified });
+    }
+  }
+  let total = files.reduce((s, f) => s + f.size, 0);
+  if (total <= OPFS_CAP) return;
+  files.sort((a, b) => a.lastModified - b.lastModified); // oldest first
+  for (const f of files) {
+    if (total <= OPFS_CAP) break;
+    await opfsDelete(f.id);
+    // Drop from in-memory history too
+    const idx = S.history.findIndex(h => h.id === f.id);
+    if (idx >= 0) S.history.splice(idx, 1);
+    total -= f.size;
+  }
+  renderHistory();
+}
+
+// ---------- Download / Save ----------
+function filenameBase() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `bolo-${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+}
+async function saveAs(blob, suggestedName) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'WebM video', accept: { 'video/webm': ['.webm'] } }]
+      });
+      const w = await handle.createWritable();
+      await w.write(blob);
+      await w.close();
+      return true;
+    } catch (e) {
+      if (e.name === 'AbortError') return false;
+      console.warn('Save failed, falling back to download', e);
+    }
+  }
+  downloadBlob(blob, suggestedName);
+  return true;
+}
+
+// ---------- Transcription (Whisper via Transformers.js) ----------
+let transcriber = null;
+let transcriberModelId = null;
+async function loadWhisper() {
+  const wantedModel = S.settings.whisperModel;
+  if (transcriber && transcriberModelId === wantedModel) return transcriber;
+  // Different model requested — drop the old pipeline.
+  transcriber = null;
+  transcriberModelId = null;
+  setProgress(0, `Loading ${wantedModel.split('/')[1]}…`);
+  try {
+    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+    transcriber = await pipeline(
+      'automatic-speech-recognition',
+      wantedModel,
+      {
+        quantized: true,
+        progress_callback: p => {
+          if (p.status === 'progress') {
+            setProgress((p.progress || 0) / 100, `Downloading ${p.file || 'model'}… ${Math.round(p.progress || 0)}%`);
+          } else if (p.status === 'loading') {
+            setProgress(0.95, 'Loading model into memory…');
+          } else if (p.status === 'ready') {
+            setProgress(1, 'Model ready');
+          }
+        }
+      }
+    );
+    transcriberModelId = wantedModel;
+    return transcriber;
+  } catch (e) {
+    console.error('Whisper load failed', e);
+    showWarning('Failed to load Whisper: ' + e.message);
+    hideProgress();
+    throw e;
+  }
+}
+
+async function transcribeRecording() {
+  if (!S.recordedBlob) return;
+  setState('transcribing');
+  $('btnTranscribe').disabled = true;
+  $('btnTranscribe').textContent = '⏳ Transcribing…';
+  hideWarning();
+
+  try {
+    const pipe = await loadWhisper();
+    setProgress(0.1, 'Extracting audio…');
+
+    const arrayBuffer = await S.recordedBlob.arrayBuffer();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    let audioBuffer;
+    try {
+      audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    } catch (e) {
+      showWarning('Could not decode audio from the recording. Did you include a mic or system audio?');
+      throw e;
+    }
+    const channelData = audioBuffer.getChannelData(0);
+
+    setProgress(0.3, 'Running Whisper (this takes ~30s per minute of audio)…');
+
+    const opts = {
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      return_timestamps: true,
+      task: S.settings.whisperTranslate ? 'translate' : 'transcribe',
+    };
+    // Only pass language if user picked one — omit lets Whisper auto-detect
+    if (S.settings.whisperLang && S.settings.whisperLang !== 'auto') {
+      opts.language = S.settings.whisperLang;
+    }
+    const result = await pipe(channelData, opts);
+
+    setProgress(1, 'Done');
+    setTimeout(hideProgress, 600);
+
+    // Build segments
+    let segments = [];
+    if (result.chunks && result.chunks.length > 0) {
+      segments = result.chunks.map(c => ({
+        start: c.timestamp[0] || 0,
+        end: c.timestamp[1] || (c.timestamp[0] || 0) + 2,
+        text: (c.text || '').trim()
+      })).filter(s => s.text);
+    } else if (result.text) {
+      segments = [{ start: 0, end: audioBuffer.duration, text: result.text.trim() }];
+    }
+
+    S.transcript = segments;
+    renderTranscript();
+    panelTranscript.classList.remove('hidden');
+    // Save transcript onto the active history item, and re-persist to OPFS
+    if (S.activeHistoryId) {
+      const active = S.history.find(h => h.id === S.activeHistoryId);
+      if (active) {
+        active.transcript = JSON.parse(JSON.stringify(segments));
+        renderHistory();
+        opfsSave(active).catch(() => {});
+      }
+    }
+    setState('done');
+    $('btnTranscribe').disabled = false;
+    $('btnTranscribe').textContent = '✨ Re-transcribe';
+  } catch (e) {
+    console.error(e);
+    setState('done');
+    $('btnTranscribe').disabled = false;
+    $('btnTranscribe').textContent = '✨ Generate Captions';
+    hideProgress();
+  }
+}
+
+function renderTranscript() {
+  if (!S.transcript) return;
+  segCount.textContent = `${S.transcript.length} segments`;
+  // Reflect bundled-download state on the action buttons
+  $('btnDownload').textContent = '↓ Download (.webm + .srt)';
+  $('btnSaveAs').textContent = '💾 Save As… (video + .srt)';
+  transcriptList.innerHTML = S.transcript.map((s, i) => `
+    <div class="seg" data-i="${i}">
+      <span class="ts">${fmtTs(s.start)}</span>
+      <span class="txt" contenteditable="true" data-i="${i}">${escapeHtml(s.text)}</span>
+    </div>
+  `).join('');
+  // Seek on timestamp click
+  transcriptList.querySelectorAll('.ts').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = parseInt(el.parentElement.dataset.i, 10);
+      recordedVideo.currentTime = S.transcript[i].start;
+      recordedVideo.play();
+    });
+  });
+  // Edit segments
+  transcriptList.querySelectorAll('.txt').forEach(el => {
+    el.addEventListener('input', () => {
+      const i = parseInt(el.dataset.i, 10);
+      S.transcript[i].text = el.textContent.trim();
+    });
+  });
+}
+function fmtTs(sec) {
+  const s = Math.floor(sec);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---------- Subtitle exports ----------
+function srtTime(sec) {
+  const ms = Math.round(sec * 1000);
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const mss = ms % 1000;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(mss).padStart(3,'0')}`;
+}
+function vttTime(sec) {
+  return srtTime(sec).replace(',', '.');
+}
+function toSrt() {
+  return S.transcript.map((s, i) =>
+    `${i+1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${s.text}\n`).join('\n');
+}
+function toVtt() {
+  return 'WEBVTT\n\n' + S.transcript.map(s =>
+    `${vttTime(s.start)} --> ${vttTime(s.end)}\n${s.text}\n`).join('\n');
+}
+function toTxt() {
+  return S.transcript.map(s => s.text).join('\n');
+}
+
+// ---------- Event wiring ----------
+document.querySelectorAll('[data-src]').forEach(btn => {
+  btn.addEventListener('click', () => toggleSource(btn.dataset.src));
+});
+micDeviceSel.addEventListener('change', async () => {
+  if (S.sources.mic) { stopStream(S.streams.mic); S.streams.mic = null; await requestMic(); }
+});
+camDeviceSel.addEventListener('change', async () => {
+  if (S.sources.webcam) { stopStream(S.streams.webcam); S.streams.webcam = null; await requestWebcam(); updatePreview(); }
+});
+
+// Overlay chips
+$('sizeChips').addEventListener('click', e => {
+  if (!e.target.dataset.size) return;
+  $('sizeChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  e.target.classList.add('on');
+  S.overlay.size = e.target.dataset.size;
+  showWebcamCssPreview();
+  saveOverlay();
+});
+$('shapeChips').addEventListener('click', e => {
+  if (!e.target.dataset.shape) return;
+  $('shapeChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  e.target.classList.add('on');
+  S.overlay.shape = e.target.dataset.shape;
+  showWebcamCssPreview();
+  saveOverlay();
+});
+$('mirrorToggle').addEventListener('change', e => {
+  S.overlay.mirror = e.target.checked;
+  showWebcamCssPreview();
+  saveOverlay();
+});
+$('fpsSelect').addEventListener('change', e => { S.settings.fps = parseInt(e.target.value, 10); saveSettings(); });
+$('formatSelect').addEventListener('change', e => { S.settings.format = e.target.value; saveSettings(); });
+$('resSelect').addEventListener('change', e => { S.settings.maxHeight = parseInt(e.target.value, 10); saveSettings(); });
+$('modelSelect').addEventListener('change', e => { S.settings.whisperModel = e.target.value; saveSettings(); });
+$('langSelect').addEventListener('change', e => { S.settings.whisperLang = e.target.value; saveSettings(); });
+$('translateToggle').addEventListener('change', e => { S.settings.whisperTranslate = e.target.checked; saveSettings(); });
+
+// Actions
+fabRecord.addEventListener('click', () => {
+  if (S.state === 'recording' || S.state === 'paused') stopRecording();
+  else startRecording();
+});
+$('floatPause').addEventListener('click', togglePause);
+$('floatStop').addEventListener('click', stopRecording);
+$('floatCancel').addEventListener('click', cancelRecording);
+
+$('btnTranscribe').addEventListener('click', transcribeRecording);
+$('btnDownload').addEventListener('click', () => {
+  if (!S.recordedBlob) return;
+  // Use the active history item's pinned name when present so video and sidecar match.
+  const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
+  const base = active ? active.name.replace(/\.webm$/i, '') : filenameBase();
+  downloadBlob(S.recordedBlob, base + '.webm');
+  // Auto-download sidecar SRT with the same basename so players auto-pick it up.
+  if (S.transcript && S.transcript.length) {
+    setTimeout(() => downloadBlob(new Blob([toSrt()], { type: 'text/plain' }), base + '.srt'), 250);
+  }
+});
+$('btnSaveAs').addEventListener('click', async () => {
+  if (!S.recordedBlob) return;
+  const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
+  const base = active ? active.name.replace(/\.webm$/i, '') : filenameBase();
+  const ok = await saveAs(S.recordedBlob, base + '.webm');
+  // After the user picked a location for the video, offer to save the .srt next to it.
+  if (ok && S.transcript && S.transcript.length) {
+    await saveAs(new Blob([toSrt()], { type: 'text/plain' }), base + '.srt');
+  }
+});
+$('btnDiscard').addEventListener('click', () => {
+  if (confirm('Discard this recording?')) cancelRecording();
+});
+
+// Live captions overlay on the playback video
+const captionsOverlay = $('captionsOverlay');
+function updateCaption() {
+  if (!S.transcript || !$('captionsToggle').checked) { captionsOverlay.textContent = ''; captionsOverlay.classList.remove('on'); return; }
+  const t = recordedVideo.currentTime;
+  // Find the segment whose [start, end] contains t
+  const seg = S.transcript.find(s => t >= s.start && t <= s.end);
+  if (seg) {
+    captionsOverlay.textContent = seg.text;
+    captionsOverlay.classList.add('on');
+  } else {
+    captionsOverlay.textContent = '';
+    captionsOverlay.classList.remove('on');
+  }
+}
+recordedVideo.addEventListener('timeupdate', updateCaption);
+recordedVideo.addEventListener('seeking', updateCaption);
+$('captionsToggle').addEventListener('change', () => {
+  if (!$('captionsToggle').checked) {
+    captionsOverlay.textContent = '';
+    captionsOverlay.classList.remove('on');
+  } else {
+    updateCaption();
+  }
+});
+
+$('btnExportSrt').addEventListener('click', () => {
+  if (S.transcript) downloadBlob(new Blob([toSrt()], { type: 'text/plain' }), filenameBase() + '.srt');
+});
+$('btnExportVtt').addEventListener('click', () => {
+  if (S.transcript) downloadBlob(new Blob([toVtt()], { type: 'text/vtt' }), filenameBase() + '.vtt');
+});
+$('btnExportTxt').addEventListener('click', () => {
+  if (S.transcript) downloadBlob(new Blob([toTxt()], { type: 'text/plain' }), filenameBase() + '.txt');
+});
+
+// Edit panel
+$('btnApplyEdit').addEventListener('click', applyEdit);
+$('btnResetTrim').addEventListener('click', resetTrim);
+
+// History list (event delegation)
+$('historyList').addEventListener('click', e => {
+  const btn = e.target.closest('.hist-btn');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const act = btn.dataset.act;
+  if (act === 'load') loadHistoryItem(id);
+  if (act === 'dl') {
+    const item = S.history.find(h => h.id === id);
+    if (item) downloadBlob(item.blob, item.name);
+  }
+  if (act === 'del') {
+    if (confirm('Delete this recording from session history?')) deleteHistoryItem(id);
+  }
+});
+
+// Help modal
+$('helpBtn').addEventListener('click', () => $('helpModal').classList.add('on'));
+$('helpClose').addEventListener('click', () => $('helpModal').classList.remove('on'));
+$('helpModal').addEventListener('click', e => { if (e.target.id === 'helpModal') e.currentTarget.classList.remove('on'); });
+
+// Keyboard shortcuts (Cmd/Ctrl+Shift+B avoids the browser's hard-reload Cmd+Shift+R)
+document.addEventListener('keydown', e => {
+  const isMod = e.metaKey || e.ctrlKey;
+  if (isMod && e.shiftKey && e.code === 'KeyB') {
+    e.preventDefault();
+    if (S.state === 'recording' || S.state === 'paused') stopRecording();
+    else if (!fabRecord.disabled) startRecording();
+  } else if (isMod && e.shiftKey && e.code === 'Period') {
+    e.preventDefault();
+    togglePause();
+  } else if (e.key === 'Escape') {
+    if (S.state === 'recording' || S.state === 'paused') {
+      if (confirm('Cancel and discard this recording?')) cancelRecording();
+    } else if ($('helpModal').classList.contains('on')) {
+      $('helpModal').classList.remove('on');
+    }
+  }
+});
+
+// Make floating bar draggable
+(function() {
+  const bar = floatBar;
+  let dragging = false, dx = 0, dy = 0;
+  bar.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'BUTTON') return;
+    dragging = true;
+    const r = bar.getBoundingClientRect();
+    dx = e.clientX - r.left;
+    dy = e.clientY - r.top;
+    bar.style.transform = 'none';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    bar.style.left = (e.clientX - dx) + 'px';
+    bar.style.top = (e.clientY - dy) + 'px';
+    bar.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => { dragging = false; });
+})();
+
+// Init
+loadOverlay();
+loadSettings();
+// Reflect loaded overlay state into the chip UI
+document.querySelectorAll('#sizeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.size === S.overlay.size));
+document.querySelectorAll('#shapeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.shape === S.overlay.shape));
+$('mirrorToggle').checked = !!S.overlay.mirror;
+// Reflect loaded settings into the form controls
+$('fpsSelect').value = String(S.settings.fps);
+$('formatSelect').value = S.settings.format;
+$('resSelect').value = String(S.settings.maxHeight);
+$('modelSelect').value = S.settings.whisperModel;
+$('langSelect').value = S.settings.whisperLang;
+$('translateToggle').checked = !!S.settings.whisperTranslate;
+attachWebcamDrag();
+attachTrimHandlers();
+enumerateDevices();
+setState('idle');
+updateRecordButton();
+// Try to restore history from OPFS (silent if unavailable)
+opfsLoadAll().then(items => {
+  if (items.length) {
+    S.history.push(...items);
+    renderHistory();
+  }
+}).catch(() => {});
+
+// Feature-detect support
+if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+  showWarning('Your browser does not support screen capture. Try a recent Chrome, Edge, Firefox or Safari.');
+  document.querySelectorAll('[data-src]').forEach(b => b.disabled = true);
+}
+</script>
+</body>
+</html>
