@@ -8,7 +8,7 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 
 - **Screen + webcam + mic capture** via `getDisplayMedia` / `getUserMedia`
 - **Drag-to-position picture-in-picture webcam overlay** — size, shape, mirror — composited in-browser via canvas. Position is remembered between sessions.
-- **Local Whisper transcription** via Transformers.js. 15 languages, auto-detect, translate-to-English toggle, three model sizes (Tiny / Base / Small).
+- **Local Whisper transcription** via Transformers.js. Whisper Small (~250 MB, downloaded once and cached), 15 languages, auto-detect, translate-to-English toggle. Pre-transcription kicks off the moment you stop recording so clicking Generate Captions is usually instant.
 - **Editable transcript** with click-to-seek timestamps and a live captions overlay during playback.
 - **Trim** — drag two handles, click Apply edit. Lossless (`-c copy`), instant.
 - **Burn captions into the video** — one checkbox, ffmpeg.wasm re-encodes the file with your edited captions baked into the pixels.
@@ -28,6 +28,10 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 
 `⌘⇧R` would conflict with browser hard-reload, so we use `B` for Bolo.
 
+## Philosophy
+
+Bolo doesn't ask you to pick "Tiny / Base / Small" or "720p / 1080p / 1440p" or "VP8 / VP9". Quality is always the best supported by your browser. The only choices you make are about *intent* — what language are you speaking in, do you want it translated. The rest is noise.
+
 ## Privacy
 
 Your recording, transcript, and edits never leave this page. There is no backend. There never will be. Close the tab and the recordings stay only in your browser's private storage (OPFS) — visible only to you, only on this device. Use Download or Save As to copy them to your real disk.
@@ -37,7 +41,7 @@ Your recording, transcript, and edits never leave this page. There is no backend
 - Vanilla JS + HTML + CSS, single file, no build step
 - `MediaRecorder` (WebM / VP9 with VP8 fallback)
 - `canvas.captureStream` for screen+webcam compositing
-- [Transformers.js](https://github.com/xenova/transformers.js) with `Xenova/whisper-{tiny,base,small}` for local transcription
+- [Transformers.js](https://github.com/xenova/transformers.js) with `Xenova/whisper-small` for local transcription
 - [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) (single-threaded core, no SharedArrayBuffer required) for trim + caption burn-in
 - [Document Picture-in-Picture API](https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API) for cross-tab recording control
 - [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) for persistent recording gallery

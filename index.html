@@ -854,44 +854,11 @@
       </label>
     </div>
 
-    <!-- Settings -->
+    <!-- Settings — only intent, never quality. Quality is always the best available. -->
     <div class="panel" id="panelSettings">
-      <h3>Settings</h3>
+      <h3>Captions</h3>
       <div class="field">
-        <label>Resolution</label>
-        <select id="resSelect">
-          <option value="0" selected>Source (auto)</option>
-          <option value="720">720p (HD)</option>
-          <option value="1080">1080p (Full HD)</option>
-          <option value="1440">1440p (2K)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Framerate</label>
-        <select id="fpsSelect">
-          <option value="24">24 fps</option>
-          <option value="30" selected>30 fps</option>
-          <option value="60">60 fps (heavy)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Format</label>
-        <select id="formatSelect">
-          <option value="vp9">WebM / VP9 (best quality)</option>
-          <option value="vp8">WebM / VP8 (wider support)</option>
-          <option value="generic">WebM (auto)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Whisper model</label>
-        <select id="modelSelect">
-          <option value="Xenova/whisper-tiny">Tiny (~40 MB · fastest)</option>
-          <option value="Xenova/whisper-base" selected>Base (~80 MB · balanced)</option>
-          <option value="Xenova/whisper-small">Small (~250 MB · accurate)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Caption language</label>
+        <label>Language</label>
         <select id="langSelect">
           <option value="auto" selected>Auto-detect</option>
           <option value="english">English</option>
@@ -912,8 +879,9 @@
       </div>
       <label class="toggle-row">
         <input type="checkbox" id="translateToggle">
-        <span>Translate captions to English</span>
+        <span>Translate to English</span>
       </label>
+      <div class="hint" style="margin-top:8px">Video records at the source resolution and best codec available. Captions use Whisper Small (~250 MB, downloaded once on first use, cached forever).</div>
     </div>
 
     <!-- Actions (post-recording only) -->
@@ -1035,7 +1003,7 @@
     </ul>
 
     <h3>Transcription (Whisper)</h3>
-    <p>After recording, click <strong>Generate Captions</strong>. Whisper runs locally via Transformers.js — the first run downloads ~40 MB of model weights (cached forever). Pick a different model or language in Settings; toggle "Translate to English" to translate from any source language.</p>
+    <p>After recording, click <strong>Generate Captions</strong>. Whisper Small runs locally via Transformers.js — the first run downloads ~250 MB of model weights, then cached forever. As soon as you stop recording, Bolo silently chains model load → audio extraction → inference in the background, so by the time you click the button it's usually instant ("⚡ Captions ready"). Pick a language or toggle "Translate to English" in the Captions panel.</p>
 
     <h3>Editing (trim + burn-in)</h3>
     <p>Drag the red handles to trim. Click <strong>Apply edit</strong> for a lossless cut (instant) or check <strong>Burn captions into video</strong> first to bake the captions into the pixels (re-encodes — slower but works on YouTube/Twitter/embeds where sidecar SRT doesn't).</p>
@@ -1075,13 +1043,15 @@ const S = {
   overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true },
   pipWindow: null,
   devices: { cams: [], mics: [] },
+  // Quality is locked to the best supported. The only knobs the user touches
+  // are about intent, not quality: caption language and translate-to-english.
   settings: {
     fps: 30,
-    format: 'vp9',
-    maxHeight: 0,                    // 0 = source resolution; otherwise 720/1080/1440
-    whisperModel: 'Xenova/whisper-base',
-    whisperLang: 'auto',             // 'auto' | 'english' | etc
-    whisperTranslate: false,         // translate-to-english
+    format: 'vp9',                   // VP9 with auto-fallback chain — no UI
+    maxHeight: 0,                    // 0 = source resolution
+    whisperModel: 'Xenova/whisper-small',  // ~250 MB, best non-medium model
+    whisperLang: 'auto',
+    whisperTranslate: false,
   },
   recorder: null,
   chunks: [],
@@ -1196,15 +1166,28 @@ function loadOverlay() {
     if (raw) Object.assign(S.overlay, JSON.parse(raw));
   } catch(e) {}
 }
-// Persist app settings
-const LS_SETTINGS = 'bolo.settings.v1';
+// Persist app settings (v2 — quality knobs removed; only language + translate)
+const LS_SETTINGS = 'bolo.settings.v2';
 function saveSettings() {
-  try { localStorage.setItem(LS_SETTINGS, JSON.stringify(S.settings)); } catch(e) {}
+  try {
+    // Only persist the user-meaningful intent fields. Quality settings are
+    // hardcoded to the best available and shouldn't be overridden by stale values.
+    localStorage.setItem(LS_SETTINGS, JSON.stringify({
+      whisperLang: S.settings.whisperLang,
+      whisperTranslate: S.settings.whisperTranslate,
+    }));
+  } catch(e) {}
 }
 function loadSettings() {
   try {
     const raw = localStorage.getItem(LS_SETTINGS);
-    if (raw) Object.assign(S.settings, JSON.parse(raw));
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (typeof saved.whisperLang === 'string') S.settings.whisperLang = saved.whisperLang;
+      if (typeof saved.whisperTranslate === 'boolean') S.settings.whisperTranslate = saved.whisperTranslate;
+    }
+    // Clean up the v1 key from anyone upgrading
+    localStorage.removeItem('bolo.settings.v1');
   } catch(e) {}
 }
 
@@ -1359,7 +1342,12 @@ async function requestMic() {
   try {
     const deviceId = micDeviceSel.value || undefined;
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: true, noiseSuppression: true }
+      audio: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      }
     });
     S.streams.mic = stream;
     await enumerateDevices();
@@ -2630,10 +2618,6 @@ $('mirrorToggle').addEventListener('change', e => {
   showWebcamCssPreview();
   saveOverlay();
 });
-$('fpsSelect').addEventListener('change', e => { S.settings.fps = parseInt(e.target.value, 10); saveSettings(); });
-$('formatSelect').addEventListener('change', e => { S.settings.format = e.target.value; saveSettings(); });
-$('resSelect').addEventListener('change', e => { S.settings.maxHeight = parseInt(e.target.value, 10); saveSettings(); });
-$('modelSelect').addEventListener('change', e => { S.settings.whisperModel = e.target.value; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
 $('langSelect').addEventListener('change', e => { S.settings.whisperLang = e.target.value; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
 $('translateToggle').addEventListener('change', e => { S.settings.whisperTranslate = e.target.checked; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
 
@@ -2781,10 +2765,6 @@ document.querySelectorAll('#sizeChips .chip').forEach(c => c.classList.toggle('o
 document.querySelectorAll('#shapeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.shape === S.overlay.shape));
 $('mirrorToggle').checked = !!S.overlay.mirror;
 // Reflect loaded settings into the form controls
-$('fpsSelect').value = String(S.settings.fps);
-$('formatSelect').value = S.settings.format;
-$('resSelect').value = String(S.settings.maxHeight);
-$('modelSelect').value = S.settings.whisperModel;
 $('langSelect').value = S.settings.whisperLang;
 $('translateToggle').checked = !!S.settings.whisperTranslate;
 attachWebcamDrag();
