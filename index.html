@@ -36,7 +36,8 @@
   body {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;        /* page never scrolls; the sidebar handles its own scroll */
   }
 
   /* ===== Header ===== */
@@ -92,31 +93,31 @@
   /* ===== Main ===== */
   main {
     flex: 1;
+    min-height: 0;                 /* CRUCIAL: lets grid children overflow inside */
     display: grid;
     grid-template-columns: 1fr 320px;
     gap: 12px;
-    padding: 12px 18px 90px;
+    padding: 12px 18px;
     max-width: 1400px;
     width: 100%;
     margin: 0 auto;
-    align-items: start;            /* prevent sidebar height from stretching the stage */
+    overflow: hidden;
   }
   @media (max-width: 960px) {
     main { grid-template-columns: 1fr; }
   }
 
-  /* Preview stage — locked height regardless of sidebar contents */
+  /* Preview stage — fills its grid column, fixed in place */
   .stage {
     background: #000;
     border: 1px solid var(--border);
     border-radius: 12px;
-    height: clamp(320px, calc(100vh - 180px), 760px);
-    position: sticky;        /* stays visible when sidebar pushes the page taller */
-    top: 12px;
+    height: 100%;
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
   }
   .stage-empty {
     color: var(--text-mute);
@@ -221,13 +222,28 @@
     50% { opacity: 0.3; }
   }
 
-  /* ===== Sidebar ===== */
+  /* ===== Sidebar — scrolls within itself, never the page ===== */
   .sidebar {
     display: flex;
     flex-direction: column;
     gap: 10px;
     min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 6px;
+    padding-bottom: 110px;          /* clearance for the FAB + footer pill */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-2) transparent;
   }
+  .sidebar::-webkit-scrollbar { width: 8px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-2);
+    border-radius: 4px;
+    border: 1px solid var(--bg);
+  }
+  .sidebar::-webkit-scrollbar-thumb:hover { background: var(--accent); }
   .panel {
     background: var(--bg-2);
     border: 1px solid var(--border);
@@ -2298,43 +2314,116 @@ async function saveAs(blob, suggestedName) {
   return true;
 }
 
-// ---------- Transcription (Whisper via Transformers.js) ----------
-let transcriber = null;
-let transcriberModelId = null;
+// ---------- Transcription (Whisper in a Web Worker) ----------
+// Whisper inference on the main thread freezes the entire UI — including the
+// playback video and the trim handles. We move it into a dedicated worker so
+// the page stays responsive while transcription runs.
+const whisperWorkerSrc = `
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+
+let pipe = null;
+let currentModel = null;
+
+self.addEventListener('message', async (e) => {
+  const { id, type, model, audioBuffer, options } = e.data;
+  try {
+    if (type === 'load') {
+      if (pipe && currentModel === model) {
+        self.postMessage({ id, type: 'ready' });
+        return;
+      }
+      pipe = null;
+      currentModel = null;
+      pipe = await pipeline('automatic-speech-recognition', model, {
+        quantized: true,
+        progress_callback: p => self.postMessage({ id, type: 'progress', data: p }),
+      });
+      currentModel = model;
+      self.postMessage({ id, type: 'ready' });
+    } else if (type === 'transcribe') {
+      if (!pipe) throw new Error('Whisper not loaded');
+      const audio = new Float32Array(audioBuffer);
+      const result = await pipe(audio, options);
+      // Strip to plain cloneable objects
+      const cleaned = {
+        text: result.text || '',
+        chunks: (result.chunks || []).map(c => ({
+          timestamp: [c.timestamp ? (c.timestamp[0] || 0) : 0, c.timestamp ? (c.timestamp[1] || 0) : 0],
+          text: c.text || '',
+        })),
+      };
+      self.postMessage({ id, type: 'result', result: cleaned });
+    }
+  } catch (err) {
+    self.postMessage({ id, type: 'error', error: (err && err.message) || String(err) });
+  }
+});
+`;
+
+let whisperWorker = null;
+let whisperLoadedModel = null;
+const whisperPending = new Map();
+let whisperNextId = 1;
+
+function getWhisperWorker() {
+  if (whisperWorker) return whisperWorker;
+  const blob = new Blob([whisperWorkerSrc], { type: 'application/javascript' });
+  const url = URL.createObjectURL(blob);
+  const w = new Worker(url, { type: 'module' });
+  // CLAUDE.md rule: blob-URL module workers fail silently without onerror
+  w.addEventListener('error', (e) => {
+    console.error('Whisper worker error:', e.message, e.filename, e.lineno);
+    for (const [, p] of whisperPending) { try { p.reject(new Error('Whisper worker crashed: ' + e.message)); } catch(_){} }
+    whisperPending.clear();
+    whisperWorker = null;
+    whisperLoadedModel = null;
+  });
+  w.addEventListener('messageerror', (e) => console.error('Whisper worker messageerror', e));
+  w.addEventListener('message', (e) => {
+    const { id, type, data, result, error } = e.data;
+    const p = whisperPending.get(id);
+    if (!p) return;
+    if (type === 'progress') { p.onProgress && p.onProgress(data); return; }
+    whisperPending.delete(id);
+    if (type === 'error') p.reject(new Error(error));
+    else if (type === 'result') p.resolve(result);
+    else p.resolve(null);
+  });
+  whisperWorker = w;
+  return w;
+}
+
+function whisperWorkerCall(type, payload, onProgress, transferList = []) {
+  const w = getWhisperWorker();
+  const id = whisperNextId++;
+  return new Promise((resolve, reject) => {
+    whisperPending.set(id, { resolve, reject, onProgress });
+    w.postMessage({ id, type, ...payload }, transferList);
+  });
+}
+
 // loadWhisper(progressCb) — if a callback is supplied the loader is silent
 // (no UI mutations), suitable for background pre-transcribe. Without it,
 // the default updates the progress panel.
 async function loadWhisper(progressCb) {
   const wantedModel = S.settings.whisperModel;
-  if (transcriber && transcriberModelId === wantedModel) return transcriber;
-  // Different model requested — drop the old pipeline.
-  transcriber = null;
-  transcriberModelId = null;
+  if (whisperLoadedModel === wantedModel) return;
   const silent = typeof progressCb === 'function';
   if (!silent) setProgress(0, `Loading ${wantedModel.split('/')[1]}…`);
   try {
-    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-    env.allowLocalModels = false;
-    env.useBrowserCache = true;
-    transcriber = await pipeline(
-      'automatic-speech-recognition',
-      wantedModel,
-      {
-        quantized: true,
-        progress_callback: p => {
-          if (silent) { try { progressCb(p); } catch(e) {} return; }
-          if (p.status === 'progress') {
-            setProgress((p.progress || 0) / 100, `Downloading ${p.file || 'model'}… ${Math.round(p.progress || 0)}%`);
-          } else if (p.status === 'loading') {
-            setProgress(0.95, 'Loading model into memory…');
-          } else if (p.status === 'ready') {
-            setProgress(1, 'Model ready');
-          }
-        }
+    await whisperWorkerCall('load', { model: wantedModel }, (p) => {
+      if (silent) { try { progressCb(p); } catch(e) {} return; }
+      if (p.status === 'progress') {
+        setProgress((p.progress || 0) / 100, `Downloading ${p.file || 'model'}… ${Math.round(p.progress || 0)}%`);
+      } else if (p.status === 'loading') {
+        setProgress(0.95, 'Loading model into memory…');
+      } else if (p.status === 'ready') {
+        setProgress(1, 'Model ready');
       }
-    );
-    transcriberModelId = wantedModel;
-    return transcriber;
+    });
+    whisperLoadedModel = wantedModel;
   } catch (e) {
     console.error('Whisper load failed', e);
     if (!silent) {
@@ -2343,6 +2432,19 @@ async function loadWhisper(progressCb) {
     }
     throw e;
   }
+}
+
+// Run inference in the worker. The audio buffer is transferred (not copied)
+// to avoid duplicating tens of MB across the main/worker boundary.
+async function runWhisper(channelData, opts) {
+  // Defensive copy so we own the buffer and can transfer it
+  const f32 = new Float32Array(channelData);
+  return whisperWorkerCall(
+    'transcribe',
+    { audioBuffer: f32.buffer, options: opts },
+    null,
+    [f32.buffer]
+  );
 }
 
 // Decode a recorded blob to 16 kHz mono Float32 (Whisper's expected input)
@@ -2414,14 +2516,14 @@ function startPreTranscribe() {
 
   S.preTranscribe.promise = (async () => {
     try {
-      // Stage 1 — load model (silent)
-      const pipe = await loadWhisper(() => {});
+      // Stage 1 — load model in the worker (silent)
+      await loadWhisper(() => {});
       if (S.recordedBlob !== blobAtStart || S.preTranscribe.key !== keyAtStart) throw new Error('cancelled');
-      // Stage 2 — extract audio
+      // Stage 2 — extract audio (cheap, main thread)
       const { channelData, duration } = await extractAudioFromBlob(blobAtStart);
       if (S.recordedBlob !== blobAtStart || S.preTranscribe.key !== keyAtStart) throw new Error('cancelled');
-      // Stage 3 — inference
-      const result = await pipe(channelData, whisperOpts());
+      // Stage 3 — inference in the worker (no main-thread freeze)
+      const result = await runWhisper(channelData, whisperOpts());
       if (S.recordedBlob !== blobAtStart || S.preTranscribe.key !== keyAtStart) throw new Error('cancelled');
       const segments = segmentsFromWhisperResult(result, duration);
       S.preTranscribe.result = segments;
@@ -2482,7 +2584,7 @@ async function transcribeRecording() {
 
     // Slow path: nothing precomputed — run the full pipeline now
     if (!segments) {
-      const pipe = await loadWhisper();
+      await loadWhisper();
       setProgress(0.1, 'Extracting audio…');
       let extracted;
       try {
@@ -2491,8 +2593,8 @@ async function transcribeRecording() {
         showWarning('Could not decode audio from the recording. Did you include a mic or system audio?');
         throw e;
       }
-      setProgress(0.3, 'Running Whisper (this takes ~30s per minute of audio)…');
-      const result = await pipe(extracted.channelData, whisperOpts());
+      setProgress(0.3, 'Running Whisper in worker (~30s per minute of audio — UI stays responsive)…');
+      const result = await runWhisper(extracted.channelData, whisperOpts());
       segments = segmentsFromWhisperResult(result, extracted.duration);
     }
 
