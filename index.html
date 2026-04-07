@@ -953,6 +953,22 @@
       </div>
     </div>
 
+    <!-- Transcript (sits right under Recording-ready, before Edit) -->
+    <div class="panel hidden" id="panelTranscript">
+      <h3>Transcript <span class="count" id="segCount"></span></h3>
+      <label class="toggle-row" style="margin-bottom:8px">
+        <input type="checkbox" id="captionsToggle" checked>
+        <span>Show captions on video</span>
+      </label>
+      <div class="transcript" id="transcriptList"></div>
+      <div class="export-row">
+        <span class="export-label">Export</span>
+        <button class="btn btn-sm" id="btnExportSrt">SRT</button>
+        <button class="btn btn-sm" id="btnExportVtt">VTT</button>
+        <button class="btn btn-sm" id="btnExportTxt">TXT</button>
+      </div>
+    </div>
+
     <!-- Edit (trim + burn-in) -->
     <div class="panel hidden" id="panelEdit">
       <h3>Edit <span class="count" id="ffmpegStatus"></span></h3>
@@ -985,22 +1001,6 @@
         <div class="progress-text" id="progressText">…</div>
       </div>
       <div class="warning" id="warningBox"></div>
-    </div>
-
-    <!-- Transcript (sits right under Edit, above History) -->
-    <div class="panel hidden" id="panelTranscript">
-      <h3>Transcript <span class="count" id="segCount"></span></h3>
-      <label class="toggle-row" style="margin-bottom:8px">
-        <input type="checkbox" id="captionsToggle" checked>
-        <span>Show captions on video</span>
-      </label>
-      <div class="transcript" id="transcriptList"></div>
-      <div class="export-row">
-        <span class="export-label">Export</span>
-        <button class="btn btn-sm" id="btnExportSrt">SRT</button>
-        <button class="btn btn-sm" id="btnExportVtt">VTT</button>
-        <button class="btn btn-sm" id="btnExportTxt">TXT</button>
-      </div>
     </div>
 
     <!-- Recent recordings (session history) -->
