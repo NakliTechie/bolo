@@ -266,6 +266,22 @@
     color: var(--text-dim);
     font-size: 10px;
   }
+  /* Collapsible panels (Sources / Captions / Overlay) */
+  .panel h3.collapsible {
+    cursor: pointer;
+    user-select: none;
+  }
+  .panel h3 .caret {
+    margin-left: auto;
+    color: var(--text-mute);
+    font-size: 11px;
+    transition: transform 0.15s;
+    line-height: 1;
+  }
+  .panel h3 .caret + .count { margin-left: 6px; }
+  .panel.collapsed h3 .caret { transform: rotate(-90deg); }
+  .panel.collapsed h3 { margin-bottom: 0; }
+  .panel.collapsed .panel-body { display: none; }
 
   /* Source toggle row */
   .source-row {
@@ -821,83 +837,89 @@
   <aside class="sidebar">
     <!-- Sources panel -->
     <div class="panel" id="panelSources">
-      <h3>Sources</h3>
-      <div class="source-row">
-        <button class="source-btn" data-src="screen" id="btnScreen">
-          <span class="icon">🖥</span><span>Screen</span>
-        </button>
-        <button class="source-btn" data-src="webcam" id="btnWebcam">
-          <span class="icon">📷</span><span>Webcam</span>
-        </button>
-        <button class="source-btn" data-src="mic" id="btnMic">
-          <span class="icon">🎙</span><span>Mic</span>
-        </button>
-      </div>
-      <div class="field" id="micDeviceField" style="display:none">
-        <label>Microphone</label>
-        <select id="micDevice"></select>
-        <div class="level-meter"><div class="level-fill" id="levelFill"></div></div>
-      </div>
-      <div class="field" id="camDeviceField" style="display:none">
-        <label>Camera</label>
-        <select id="camDevice"></select>
+      <h3 class="collapsible">Sources <span class="caret">▾</span></h3>
+      <div class="panel-body">
+        <div class="source-row">
+          <button class="source-btn" data-src="screen" id="btnScreen">
+            <span class="icon">🖥</span><span>Screen</span>
+          </button>
+          <button class="source-btn" data-src="webcam" id="btnWebcam">
+            <span class="icon">📷</span><span>Webcam</span>
+          </button>
+          <button class="source-btn" data-src="mic" id="btnMic">
+            <span class="icon">🎙</span><span>Mic</span>
+          </button>
+        </div>
+        <div class="field" id="micDeviceField" style="display:none">
+          <label>Microphone</label>
+          <select id="micDevice"></select>
+          <div class="level-meter"><div class="level-fill" id="levelFill"></div></div>
+        </div>
+        <div class="field" id="camDeviceField" style="display:none">
+          <label>Camera</label>
+          <select id="camDevice"></select>
+        </div>
       </div>
     </div>
 
     <!-- Webcam overlay controls -->
     <div class="panel hidden" id="panelOverlay">
-      <h3>Webcam overlay</h3>
-      <div class="hint" style="margin-bottom:8px">↔ Drag the webcam in the preview to position it. Position is remembered.</div>
-      <div class="field">
-        <label>Size</label>
-        <div class="chip-row" id="sizeChips">
-          <span class="chip on" data-size="s">Small</span>
-          <span class="chip" data-size="m">Medium</span>
-          <span class="chip" data-size="l">Large</span>
+      <h3 class="collapsible">Webcam overlay <span class="caret">▾</span></h3>
+      <div class="panel-body">
+        <div class="hint" style="margin-bottom:8px">↔ Drag the webcam in the preview to position it. Position is remembered.</div>
+        <div class="field">
+          <label>Size</label>
+          <div class="chip-row" id="sizeChips">
+            <span class="chip on" data-size="s">Small</span>
+            <span class="chip" data-size="m">Medium</span>
+            <span class="chip" data-size="l">Large</span>
+          </div>
         </div>
-      </div>
-      <div class="field">
-        <label>Shape</label>
-        <div class="chip-row" id="shapeChips">
-          <span class="chip" data-shape="square">Square</span>
-          <span class="chip on" data-shape="rounded">Rounded</span>
-          <span class="chip" data-shape="circle">Circle</span>
+        <div class="field">
+          <label>Shape</label>
+          <div class="chip-row" id="shapeChips">
+            <span class="chip" data-shape="square">Square</span>
+            <span class="chip on" data-shape="rounded">Rounded</span>
+            <span class="chip" data-shape="circle">Circle</span>
+          </div>
         </div>
+        <label class="toggle-row" style="margin-top:6px">
+          <input type="checkbox" id="mirrorToggle" checked>
+          <span>Mirror (flip horizontally)</span>
+        </label>
       </div>
-      <label class="toggle-row" style="margin-top:6px">
-        <input type="checkbox" id="mirrorToggle" checked>
-        <span>Mirror (flip horizontally)</span>
-      </label>
     </div>
 
     <!-- Settings — only intent, never quality. Quality is always the best available. -->
     <div class="panel" id="panelSettings">
-      <h3>Captions</h3>
-      <div class="field">
-        <label>Language</label>
-        <select id="langSelect">
-          <option value="auto" selected>Auto-detect</option>
-          <option value="english">English</option>
-          <option value="spanish">Spanish</option>
-          <option value="french">French</option>
-          <option value="german">German</option>
-          <option value="italian">Italian</option>
-          <option value="portuguese">Portuguese</option>
-          <option value="dutch">Dutch</option>
-          <option value="russian">Russian</option>
-          <option value="chinese">Chinese</option>
-          <option value="japanese">Japanese</option>
-          <option value="korean">Korean</option>
-          <option value="hindi">Hindi</option>
-          <option value="arabic">Arabic</option>
-          <option value="turkish">Turkish</option>
-        </select>
+      <h3 class="collapsible">Captions <span class="caret">▾</span></h3>
+      <div class="panel-body">
+        <div class="field">
+          <label>Language</label>
+          <select id="langSelect">
+            <option value="auto" selected>Auto-detect</option>
+            <option value="english">English</option>
+            <option value="spanish">Spanish</option>
+            <option value="french">French</option>
+            <option value="german">German</option>
+            <option value="italian">Italian</option>
+            <option value="portuguese">Portuguese</option>
+            <option value="dutch">Dutch</option>
+            <option value="russian">Russian</option>
+            <option value="chinese">Chinese</option>
+            <option value="japanese">Japanese</option>
+            <option value="korean">Korean</option>
+            <option value="hindi">Hindi</option>
+            <option value="arabic">Arabic</option>
+            <option value="turkish">Turkish</option>
+          </select>
+        </div>
+        <label class="toggle-row">
+          <input type="checkbox" id="translateToggle">
+          <span>Translate to English</span>
+        </label>
+        <div class="hint" style="margin-top:8px">Video records at the source resolution and best codec available. Captions use Whisper Small (~250 MB, downloaded once on first use, cached forever).</div>
       </div>
-      <label class="toggle-row">
-        <input type="checkbox" id="translateToggle">
-        <span>Translate to English</span>
-      </label>
-      <div class="hint" style="margin-top:8px">Video records at the source resolution and best codec available. Captions use Whisper Small (~250 MB, downloaded once on first use, cached forever).</div>
     </div>
 
     <!-- Actions (post-recording only) -->
@@ -1131,18 +1153,36 @@ function setState(next) {
   if (next === 'done' || next === 'stopped') statusPill.classList.add('ok');
 }
 
-// Show or hide the recording-setup panels (Sources / Overlay / Settings).
-// Hidden after a recording is captured so the post-recording panels (Edit /
-// Transcript / History) are visible without scrolling. Restored on Start Over.
-function setSetupPanelsVisible(visible) {
-  $('panelSources').classList.toggle('hidden', !visible);
-  $('panelSettings').classList.toggle('hidden', !visible);
-  if (visible) {
-    // Overlay panel obeys its own condition: only when both screen+webcam are on
-    $('panelOverlay').classList.toggle('hidden', !(S.sources.screen && S.sources.webcam));
-  } else {
-    $('panelOverlay').classList.add('hidden');
-  }
+// Collapse / expand the recording-setup panels (Sources / Overlay / Captions).
+// After a recording is captured we collapse them — header stays visible (and
+// clickable to re-expand) so users can still get to the Sources toggle, but
+// the Edit / Transcript / History panels bubble straight to the top. The
+// Overlay panel additionally hides entirely when its precondition is gone.
+function setSetupPanelsCollapsed(collapsed) {
+  $('panelSources').classList.toggle('collapsed', collapsed);
+  $('panelSettings').classList.toggle('collapsed', collapsed);
+  // Overlay only matters when both screen+webcam are still on
+  const overlayApplies = S.sources.screen && S.sources.webcam;
+  $('panelOverlay').classList.toggle('hidden', !overlayApplies);
+  if (overlayApplies) $('panelOverlay').classList.toggle('collapsed', collapsed);
+}
+
+// Stop every active capture stream and reset the source UI to "off". Called
+// after a recording finishes so the camera light, mic indicator and screen-
+// share pill all go away. The Sources panel header stays visible (collapsed),
+// so the user can re-enable for the next take.
+function stopAllSources() {
+  if (S.streams.screen) { stopStream(S.streams.screen); S.streams.screen = null; }
+  if (S.streams.webcam) { stopStream(S.streams.webcam); S.streams.webcam = null; webcamVideo.srcObject = null; }
+  if (S.streams.mic)    { stopStream(S.streams.mic); S.streams.mic = null; stopAudioMeter(); }
+  S.sources.screen = false;
+  S.sources.webcam = false;
+  S.sources.mic = false;
+  document.querySelectorAll('[data-src]').forEach(b => b.classList.remove('on'));
+  micDeviceField.style.display = 'none';
+  camDeviceField.style.display = 'none';
+  $('panelOverlay').classList.add('hidden');
+  updateRecordButton();
 }
 function fmtTime(ms) {
   const s = Math.floor(ms / 1000);
@@ -1839,7 +1879,9 @@ function onRecorderStopped() {
   recordedVideo.classList.add('on');
   panelDone.classList.remove('hidden');
   showEditPanel();
-  setSetupPanelsVisible(false);   // collapse setup panels — Edit/Transcript/History bubble up
+  // Collapse the setup panels (header still visible) and free the camera/mic/screen
+  stopAllSources();
+  setSetupPanelsCollapsed(true);
   // Persist to OPFS in the background (non-blocking)
   if (S.activeHistoryId) {
     const active = S.history.find(h => h.id === S.activeHistoryId);
@@ -1873,7 +1915,7 @@ function resetToIdle() {
   hideWarning();
   invalidatePreTranscribe();
   setState(S.sources.screen || S.sources.webcam || S.sources.mic ? 'configuring' : 'idle');
-  setSetupPanelsVisible(true);    // bring back Sources / Overlay (if both on) / Settings
+  setSetupPanelsCollapsed(false);  // expand Sources / Captions back so user can pick fresh
   updatePreview();
   updateRecordButton();
   renderHistory();
@@ -2149,7 +2191,7 @@ function loadHistoryItem(id) {
   webcamPreview.classList.remove('on');
   panelDone.classList.remove('hidden');
   showEditPanel();
-  setSetupPanelsVisible(false);
+  setSetupPanelsCollapsed(true);
   S.transcript = item.transcript ? JSON.parse(JSON.stringify(item.transcript)) : null;
   if (S.transcript) {
     renderTranscript();
@@ -2797,6 +2839,13 @@ $('btnExportTxt').addEventListener('click', () => {
 // Edit panel
 $('btnApplyEdit').addEventListener('click', applyEdit);
 $('btnResetTrim').addEventListener('click', resetTrim);
+
+// Click a collapsible panel header to expand/collapse it
+document.querySelector('.sidebar').addEventListener('click', (e) => {
+  const h = e.target.closest('.panel h3.collapsible');
+  if (!h) return;
+  h.parentElement.classList.toggle('collapsed');
+});
 
 // History list (event delegation)
 $('historyList').addEventListener('click', e => {
