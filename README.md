@@ -66,7 +66,7 @@ Or just open `index.html` directly in Chrome — works from `file://` too.
 
 ## Live demo
 
-[**naklitechie.github.io/bolo**](https://naklitechie.github.io/bolo/) (once deployed)
+[**bolo.naklitechie.com**](https://bolo.naklitechie.com/)
 
 ## License
 
