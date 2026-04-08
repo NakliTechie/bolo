@@ -948,7 +948,6 @@
       <div class="actions" id="actionsDone">
         <button class="btn btn-primary" id="btnTranscribe">✨ Generate Captions</button>
         <button class="btn" id="btnDownload">↓ Download</button>
-        <button class="btn" id="btnSaveAs">💾 Save As…</button>
         <button class="btn btn-ghost btn-danger" id="btnDiscard">Start Over</button>
       </div>
     </div>
@@ -1914,9 +1913,8 @@ function onRecorderStopped() {
 
 function resetToIdle() {
   // Note: history is preserved. Only the active playback is unloaded.
-  // Reset bundled-download labels to their default
+  // Reset bundled-download label to its default
   $('btnDownload').textContent = '↓ Download';
-  $('btnSaveAs').textContent = '💾 Save As…';
   S.recordedBlob = null;
   S.chunks = [];
   S.activeHistoryId = null;
@@ -2223,7 +2221,6 @@ function loadHistoryItem(id) {
     panelTranscript.classList.add('hidden');
     $('btnTranscribe').textContent = '✨ Generate Captions';
     $('btnDownload').textContent = '↓ Download';
-    $('btnSaveAs').textContent = '💾 Save As…';
     // Reloaded a recording without captions — start the pre-transcribe pipeline
     invalidatePreTranscribe();
     startPreTranscribe();
@@ -2360,25 +2357,6 @@ function downloadBlob(blob, name) {
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-}
-async function saveAs(blob, suggestedName) {
-  if (window.showSaveFilePicker) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName,
-        types: [{ description: 'WebM video', accept: { 'video/webm': ['.webm'] } }]
-      });
-      const w = await handle.createWritable();
-      await w.write(blob);
-      await w.close();
-      return true;
-    } catch (e) {
-      if (e.name === 'AbortError') return false;
-      console.warn('Save failed, falling back to download', e);
-    }
-  }
-  downloadBlob(blob, suggestedName);
-  return true;
 }
 
 // ---------- Transcription (Whisper in a Web Worker) ----------
@@ -2702,9 +2680,8 @@ async function transcribeRecording() {
 function renderTranscript() {
   if (!S.transcript) return;
   segCount.textContent = `${S.transcript.length} segments`;
-  // Reflect bundled-download state on the action buttons
+  // Reflect bundled-download state on the action button
   $('btnDownload').textContent = '↓ Download (.webm + .srt)';
-  $('btnSaveAs').textContent = '💾 Save As… (video + .srt)';
   transcriptList.innerHTML = S.transcript.map((s, i) => `
     <div class="seg" data-i="${i}">
       <span class="ts">${fmtTs(s.start)}</span>
@@ -2816,16 +2793,6 @@ $('btnDownload').addEventListener('click', () => {
   // Auto-download sidecar SRT with the same basename so players auto-pick it up.
   if (S.transcript && S.transcript.length) {
     setTimeout(() => downloadBlob(new Blob([toSrt()], { type: 'text/plain' }), base + '.srt'), 250);
-  }
-});
-$('btnSaveAs').addEventListener('click', async () => {
-  if (!S.recordedBlob) return;
-  const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
-  const base = active ? active.name.replace(/\.webm$/i, '') : filenameBase();
-  const ok = await saveAs(S.recordedBlob, base + '.webm');
-  // After the user picked a location for the video, offer to save the .srt next to it.
-  if (ok && S.transcript && S.transcript.length) {
-    await saveAs(new Blob([toSrt()], { type: 'text/plain' }), base + '.srt');
   }
 });
 $('btnDiscard').addEventListener('click', () => {
