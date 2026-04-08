@@ -491,59 +491,6 @@
   }
   .float-bar .stop:hover { background: var(--accent-hover); color: white; }
 
-  /* Trim timeline */
-  .trim-bar {
-    margin-top: 8px;
-  }
-  .trim-track {
-    position: relative;
-    height: 28px;
-    background: var(--bg-3);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .trim-range {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    background: var(--accent-dim);
-    border-left: 2px solid var(--accent);
-    border-right: 2px solid var(--accent);
-    pointer-events: none;
-  }
-  .trim-handle {
-    position: absolute;
-    top: -2px;
-    bottom: -2px;
-    width: 14px;
-    background: var(--accent);
-    border-radius: 4px;
-    cursor: ew-resize;
-    transform: translateX(-50%);
-    box-shadow: 0 2px 6px rgba(229, 57, 53, 0.5);
-    z-index: 2;
-  }
-  .trim-handle::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 2px;
-    height: 12px;
-    background: white;
-    border-radius: 1px;
-  }
-  .trim-times {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: var(--text-mute);
-    margin-top: 6px;
-    font-variant-numeric: tabular-nums;
-  }
-
   /* History list */
   .history-list {
     display: flex;
@@ -968,31 +915,6 @@
       </div>
     </div>
 
-    <!-- Edit (trim + burn-in) -->
-    <div class="panel hidden" id="panelEdit">
-      <h3>Edit <span class="count" id="ffmpegStatus"></span></h3>
-      <div class="trim-bar">
-        <div class="trim-track" id="trimTrack">
-          <div class="trim-range" id="trimRange"></div>
-          <div class="trim-handle" id="trimStart" data-handle="start"></div>
-          <div class="trim-handle" id="trimEnd" data-handle="end"></div>
-        </div>
-        <div class="trim-times">
-          <span id="trimStartTime">00:00.0</span>
-          <span id="trimDuration">00:00.0</span>
-          <span id="trimEndTime">00:00.0</span>
-        </div>
-      </div>
-      <label class="toggle-row" style="margin-top:10px">
-        <input type="checkbox" id="burnInToggle">
-        <span>Burn captions into video (re-encodes, slower)</span>
-      </label>
-      <div class="actions" style="margin-top:10px">
-        <button class="btn btn-primary" id="btnApplyEdit">⚙ Apply edit</button>
-        <button class="btn btn-ghost" id="btnResetTrim">Reset trim</button>
-      </div>
-      <div class="hint" style="margin-top:6px">Trim is lossless and instant. Burn-in re-encodes — expect ~real-time on a modern laptop.</div>
-    </div>
     <!-- Status / progress -->
     <div class="panel hidden" id="panelStatus">
       <div class="progress-wrap" id="progressWrap">
@@ -1058,10 +980,6 @@
 
     <h3>Transcription (Whisper)</h3>
     <p>After recording, click <strong>Generate Captions</strong>. Whisper Small runs locally via Transformers.js — the first run downloads ~250 MB of model weights, then cached forever. As soon as you stop recording, Bolo silently chains model load → audio extraction → inference in the background, so by the time you click the button it's usually instant ("⚡ Captions ready"). Pick a language or toggle "Translate to English" in the Captions panel.</p>
-
-    <h3>Editing (trim + burn-in)</h3>
-    <p>Drag the red handles to trim. Click <strong>Apply edit</strong> for a lossless cut (instant) or check <strong>Burn captions into video</strong> first to bake the captions into the pixels (re-encodes — slower but works on YouTube/Twitter/embeds where sidecar SRT doesn't).</p>
-    <p style="font-size:11px; color:var(--text-mute)">Editor uses ffmpeg.wasm — ~25 MB, lazy-loaded in the background while you record so it's ready when you stop.</p>
 
     <h3>Recordings gallery</h3>
     <p>Recent recordings live in your browser's private storage (~500 MB cap). They survive reloads. Use Download or Save As to copy them to your real disk.</p>
@@ -1801,9 +1719,6 @@ async function startRecording() {
   if (!S.pipWindow) floatBar.classList.add('on');
   S.timerInterval = setInterval(updateTimer, 250);
   updateTimer();
-  // Spec §7: background-prefetch ffmpeg.wasm. Most recordings outlast the load,
-  // so by the time the user finishes, the editor is ready instantly.
-  prefetchFfmpeg();
 }
 
 function updateTimer() {
@@ -1894,7 +1809,6 @@ function onRecorderStopped() {
   recordedVideo.src = URL.createObjectURL(S.recordedBlob);
   recordedVideo.classList.add('on');
   panelDone.classList.remove('hidden');
-  showEditPanel();
   // Collapse the setup panels (header still visible) and free the camera/mic/screen
   stopAllSources();
   setSetupPanelsCollapsed(true);
@@ -1921,7 +1835,6 @@ function resetToIdle() {
   if (recordedVideo.src) { URL.revokeObjectURL(recordedVideo.src); recordedVideo.src = ''; }
   recordedVideo.classList.remove('on');
   panelDone.classList.add('hidden');
-  $('panelEdit').classList.add('hidden');
   panelTranscript.classList.add('hidden');
   S.transcript = null;
   captionsOverlay.textContent = '';
@@ -1934,230 +1847,6 @@ function resetToIdle() {
   updatePreview();
   updateRecordButton();
   renderHistory();
-}
-
-// ---------- ffmpeg.wasm (lazy-loaded, single-threaded core for GitHub Pages) ----------
-// Per spec §7: background prefetch when recording starts. Falls back gracefully.
-let ffmpegInstance = null;
-let ffmpegFetchFile = null;
-let ffmpegLoading = null;
-async function loadFfmpeg(onProgress) {
-  if (ffmpegInstance) return ffmpegInstance;
-  if (ffmpegLoading) return ffmpegLoading;
-  ffmpegLoading = (async () => {
-    try {
-      // Single-threaded core needs no SharedArrayBuffer / COOP / COEP headers.
-      const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
-      const util = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/+esm');
-      ffmpegFetchFile = util.fetchFile;
-      const coreBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
-      // ffmpeg.wasm internally spawns its own wrapper Worker. The default URL is
-      // resolved relative to the CDN, which trips cross-origin Worker construction
-      // from any non-jsdelivr page (file://, localhost, github.io, ...). Fix by
-      // fetching the worker JS and handing ffmpeg a same-origin blob URL for it.
-      const classWorkerURL = await util.toBlobURL(
-        'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
-        'text/javascript'
-      );
-      const ff = new FFmpeg();
-      ff.on('progress', ({ progress }) => {
-        if (onProgress && progress >= 0 && progress <= 1) onProgress(progress);
-      });
-      ff.on('log', ({ message }) => {
-        // Uncomment for debugging
-        // console.log('[ffmpeg]', message);
-      });
-      await ff.load({
-        coreURL: await util.toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await util.toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
-        classWorkerURL,
-      });
-      ffmpegInstance = ff;
-      // Live-update the edit panel status if it's currently open. Lets the
-      // hint flip from "loading editor…" to "editor ready" without any user
-      // interaction — same vibe as the "⚡ Captions ready" hint.
-      const statusEl = document.getElementById('ffmpegStatus');
-      if (statusEl) statusEl.textContent = '· editor ready';
-      return ff;
-    } catch (e) {
-      console.error('ffmpeg load failed', e);
-      ffmpegLoading = null;
-      throw e;
-    }
-  })();
-  return ffmpegLoading;
-}
-function ffmpegReady() { return !!ffmpegInstance; }
-// Fire-and-forget background prefetch — called when recording starts
-function prefetchFfmpeg() {
-  if (ffmpegInstance || ffmpegLoading) return;
-  loadFfmpeg().catch(() => { /* swallow — we'll retry on first edit click */ });
-}
-
-// ---------- Trim UI (drives ffmpeg edit pipeline) ----------
-const trimState = { duration: 0, startSec: 0, endSec: 0 };
-function fmtTimeFine(sec) {
-  if (!isFinite(sec) || sec < 0) sec = 0;
-  const m = Math.floor(sec / 60);
-  const s = sec - m * 60;
-  return `${String(m).padStart(2,'0')}:${s.toFixed(1).padStart(4,'0')}`;
-}
-function updateTrimUI() {
-  const d = trimState.duration || 1;
-  const sPct = (trimState.startSec / d) * 100;
-  const ePct = (trimState.endSec / d) * 100;
-  $('trimStart').style.left = sPct + '%';
-  $('trimEnd').style.left = ePct + '%';
-  $('trimRange').style.left = sPct + '%';
-  $('trimRange').style.right = (100 - ePct) + '%';
-  $('trimStartTime').textContent = fmtTimeFine(trimState.startSec);
-  $('trimEndTime').textContent = fmtTimeFine(trimState.endSec);
-  $('trimDuration').textContent = fmtTimeFine(trimState.endSec - trimState.startSec);
-}
-function resetTrim() {
-  trimState.startSec = 0;
-  trimState.endSec = trimState.duration;
-  updateTrimUI();
-}
-function attachTrimHandlers() {
-  let dragging = null;
-  const track = $('trimTrack');
-  const onDown = (e) => {
-    const target = e.target.closest('.trim-handle');
-    if (!target) return;
-    e.preventDefault();
-    dragging = target.dataset.handle;
-  };
-  const onMove = (e) => {
-    if (!dragging) return;
-    const r = track.getBoundingClientRect();
-    const t = (e.touches ? e.touches[0] : e);
-    let pct = (t.clientX - r.left) / r.width;
-    pct = Math.max(0, Math.min(1, pct));
-    const sec = pct * trimState.duration;
-    if (dragging === 'start') {
-      trimState.startSec = Math.min(sec, trimState.endSec - 0.1);
-      recordedVideo.currentTime = trimState.startSec;
-    } else {
-      trimState.endSec = Math.max(sec, trimState.startSec + 0.1);
-      recordedVideo.currentTime = trimState.endSec;
-    }
-    updateTrimUI();
-  };
-  const onUp = () => { dragging = null; };
-  track.addEventListener('mousedown', onDown);
-  track.addEventListener('touchstart', onDown, { passive: false });
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('touchmove', onMove, { passive: false });
-  document.addEventListener('mouseup', onUp);
-  document.addEventListener('touchend', onUp);
-}
-function showEditPanel() {
-  $('panelEdit').classList.remove('hidden');
-  // Wait for video metadata for accurate duration
-  const setDur = () => {
-    let d = recordedVideo.duration;
-    // WebM blobs from MediaRecorder often report Infinity until you seek to the end.
-    // Fallback: probe by seeking past the end.
-    if (!isFinite(d) || d <= 0) {
-      recordedVideo.currentTime = 1e9;
-      const fix = () => {
-        d = recordedVideo.duration;
-        recordedVideo.currentTime = 0;
-        recordedVideo.removeEventListener('timeupdate', fix);
-        if (isFinite(d) && d > 0) {
-          trimState.duration = d;
-          resetTrim();
-        }
-      };
-      recordedVideo.addEventListener('timeupdate', fix);
-      return;
-    }
-    trimState.duration = d;
-    resetTrim();
-  };
-  if (recordedVideo.readyState >= 1) setDur();
-  else recordedVideo.addEventListener('loadedmetadata', setDur, { once: true });
-  // Reflect ffmpeg load state
-  if (ffmpegInstance) $('ffmpegStatus').textContent = '· editor ready';
-  else if (ffmpegLoading) $('ffmpegStatus').textContent = '· loading editor…';
-  else $('ffmpegStatus').textContent = '';
-}
-
-// Run the chosen edit through ffmpeg.wasm. Trim is lossless (-c copy);
-// burn-in re-encodes (subtitles filter requires it).
-async function applyEdit() {
-  if (!S.recordedBlob) return;
-  const start = trimState.startSec;
-  const end = trimState.endSec;
-  const wantBurn = $('burnInToggle').checked && S.transcript && S.transcript.length;
-  const isTrim = (start > 0.05) || (end < trimState.duration - 0.05);
-  if (!isTrim && !wantBurn) {
-    showWarning('Nothing to apply — pick a trim range or enable burn-in.');
-    return;
-  }
-  try {
-    setProgress(0, 'Loading editor (ffmpeg.wasm)…');
-    const ff = await loadFfmpeg(p => setProgress(0.2 + p * 0.7, wantBurn ? 'Re-encoding (burn-in)…' : 'Trimming…'));
-    $('ffmpegStatus').textContent = '· editor ready';
-    setProgress(0.15, 'Writing input…');
-    await ff.writeFile('in.webm', await ffmpegFetchFile(S.recordedBlob));
-    let outName = 'out.webm';
-    if (wantBurn) {
-      // Burn-in path: write the SRT, run subtitles filter, re-encode video, copy audio.
-      await ff.writeFile('subs.srt', new TextEncoder().encode(toSrt()));
-      const args = [];
-      if (isTrim) args.push('-ss', String(start), '-to', String(end));
-      args.push('-i', 'in.webm');
-      args.push('-vf', 'subtitles=subs.srt');
-      args.push('-c:v', 'libvpx', '-b:v', '2M');
-      args.push('-c:a', 'copy');
-      args.push(outName);
-      setProgress(0.25, 'Re-encoding with captions burned in…');
-      await ff.exec(args);
-    } else {
-      // Lossless trim — stream copy
-      const args = [];
-      args.push('-ss', String(start), '-to', String(end));
-      args.push('-i', 'in.webm');
-      args.push('-c', 'copy');
-      args.push(outName);
-      setProgress(0.5, 'Trimming (lossless stream copy)…');
-      await ff.exec(args);
-    }
-    setProgress(0.95, 'Reading output…');
-    const data = await ff.readFile(outName);
-    const newBlob = new Blob([data.buffer], { type: 'video/webm' });
-    // Replace the active recording with the edited one (and history entry too)
-    if (S.activeHistoryId) {
-      const active = S.history.find(h => h.id === S.activeHistoryId);
-      if (active) {
-        active.blob = newBlob;
-        active.sizeBytes = newBlob.size;
-        active.name = active.name.replace(/\.webm$/, wantBurn ? '-captioned.webm' : '-trimmed.webm');
-        renderHistory();
-        opfsSave(active).catch(() => {});
-      }
-    }
-    S.recordedBlob = newBlob;
-    if (recordedVideo.src) URL.revokeObjectURL(recordedVideo.src);
-    recordedVideo.src = URL.createObjectURL(newBlob);
-    // Reset trim state to the new duration
-    trimState.duration = end - start;
-    trimState.startSec = 0;
-    trimState.endSec = trimState.duration;
-    updateTrimUI();
-    setProgress(1, 'Done.');
-    setTimeout(hideProgress, 800);
-    // Clean up ffmpeg FS
-    try { await ff.deleteFile('in.webm'); } catch(e) {}
-    try { await ff.deleteFile(outName); } catch(e) {}
-    try { if (wantBurn) await ff.deleteFile('subs.srt'); } catch(e) {}
-  } catch (e) {
-    console.error('Edit failed', e);
-    showWarning('Edit failed: ' + (e.message || e));
-    hideProgress();
-  }
 }
 
 // ---------- Session history ----------
@@ -2210,7 +1899,6 @@ function loadHistoryItem(id) {
   previewVideo.classList.remove('on');
   webcamPreview.classList.remove('on');
   panelDone.classList.remove('hidden');
-  showEditPanel();
   setSetupPanelsCollapsed(true);
   S.transcript = item.transcript ? JSON.parse(JSON.stringify(item.transcript)) : null;
   if (S.transcript) {
@@ -2225,9 +1913,6 @@ function loadHistoryItem(id) {
     invalidatePreTranscribe();
     startPreTranscribe();
   }
-  // User just opened a recording — they're likely about to edit it.
-  // Kick off ffmpeg.wasm in the background so trim/burn-in are instant.
-  prefetchFfmpeg();
   setState('done');
   updateRecordButton();
   renderHistory();
@@ -2578,10 +2263,6 @@ function startPreTranscribe() {
         const btn = $('btnTranscribe');
         if (btn) btn.textContent = '⚡ Captions ready';
       }
-      // Now that Whisper is done downloading and crunching, kick off the
-      // ffmpeg.wasm prefetch in the background so it's also ready by the
-      // time the user clicks Apply Edit. Idempotent — no-op if already loading.
-      prefetchFfmpeg();
       return segments;
     } catch (e) {
       // Silent failure — the foreground path will retry with full UI on click
@@ -2665,9 +2346,6 @@ async function transcribeRecording() {
     setState('done');
     $('btnTranscribe').disabled = false;
     $('btnTranscribe').textContent = '✨ Re-transcribe';
-    // Whisper crunch is over — chain the ffmpeg.wasm prefetch so trim and
-    // burn-in are ready instantly when the user clicks Apply Edit.
-    prefetchFfmpeg();
   } catch (e) {
     console.error(e);
     setState('done');
@@ -2835,10 +2513,6 @@ $('btnExportTxt').addEventListener('click', () => {
   if (S.transcript) downloadBlob(new Blob([toTxt()], { type: 'text/plain' }), filenameBase() + '.txt');
 });
 
-// Edit panel
-$('btnApplyEdit').addEventListener('click', applyEdit);
-$('btnResetTrim').addEventListener('click', resetTrim);
-
 // Click a collapsible panel header to expand/collapse it
 document.querySelector('.sidebar').addEventListener('click', (e) => {
   const h = e.target.closest('.panel h3.collapsible');
@@ -2918,7 +2592,6 @@ $('mirrorToggle').checked = !!S.overlay.mirror;
 $('langSelect').value = S.settings.whisperLang;
 $('translateToggle').checked = !!S.settings.whisperTranslate;
 attachWebcamDrag();
-attachTrimHandlers();
 enumerateDevices();
 setState('idle');
 updateRecordButton();

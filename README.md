@@ -2,7 +2,7 @@
 
 **Record your screen. Speak your mind. Nothing leaves your device.**
 
-Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, transcribes audio locally via Whisper, lets you trim and burn captions in via ffmpeg.wasm, and exports a finished file — all in your browser. No account, no server, no upload, no telemetry.
+Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, transcribes audio locally via Whisper, and exports a finished file — all in your browser. No account, no server, no upload, no telemetry.
 
 ## What it does
 
@@ -10,9 +10,7 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 - **Drag-to-position picture-in-picture webcam overlay** — size, shape, mirror — composited in-browser via canvas. Position is remembered between sessions.
 - **Local Whisper transcription** via Transformers.js. Whisper Small (~250 MB, downloaded once and cached), 15 languages, auto-detect, translate-to-English toggle. Pre-transcription kicks off the moment you stop recording so clicking Generate Captions is usually instant.
 - **Editable transcript** with click-to-seek timestamps and a live captions overlay during playback.
-- **Trim** — drag two handles, click Apply edit. Lossless (`-c copy`), instant.
-- **Burn captions into the video** — one checkbox, ffmpeg.wasm re-encodes the file with your edited captions baked into the pixels.
-- **SRT / VTT / TXT subtitle export**. Download bundles a same-name `.srt` automatically so VLC, IINA and mpv auto-load it.
+- **SRT / VTT / TXT subtitle export**. Download bundles a same-name `.srt` automatically so VLC, IINA and mpv auto-load it. For caption burn-in, run `ffmpeg -i in.webm -vf subtitles=in.srt out.mp4` at the shell (Bolo's in-browser burn-in is deferred — see *Known limitations*).
 - **Persistent recordings gallery** — recent captures live in OPFS (browser-private filesystem), survive reloads, 500 MB cap with FIFO eviction.
 - **Cross-tab control** — recording another tab? Bolo opens a tiny always-on-top Document Picture-in-Picture window with timer + pause + stop, so you can control it from anywhere.
 - **3-2-1 countdown**, pause/resume, floating recording control bar, keyboard shortcuts, self-capture detection.
@@ -28,6 +26,10 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 
 `⌘⇧R` would conflict with browser hard-reload, so we use `B` for Bolo.
 
+## Known limitations
+
+- **No in-browser trim or caption burn-in yet.** I tried. `@ffmpeg/ffmpeg` 0.12's ESM wrapper spawns its own class worker from `dist/esm/worker.js`, which contains relative module imports (`./const.js`, `./errors.js`) that can't resolve when the worker is loaded via a cross-origin blob URL. The package was designed to be hosted same-origin. Every CDN-based workaround I tried either hung silently or threw a `SecurityError`. Self-hosting the worker files would break Bolo's single-HTML-file constraint. Workarounds that still work: trim externally in QuickTime/VLC, and burn in captions via `ffmpeg -i in.webm -vf subtitles=in.srt out.mp4` at the shell. Bolo's Download button already bundles the sidecar `.srt` for you.
+
 ## Philosophy
 
 Bolo doesn't ask you to pick "Tiny / Base / Small" or "720p / 1080p / 1440p" or "VP8 / VP9". Quality is always the best supported by your browser. The only choices you make are about *intent* — what language are you speaking in, do you want it translated. The rest is noise.
@@ -42,7 +44,6 @@ Your recording, transcript, and edits never leave this page. There is no backend
 - `MediaRecorder` (WebM / VP9 with VP8 fallback)
 - `canvas.captureStream` for screen+webcam compositing
 - [Transformers.js](https://github.com/xenova/transformers.js) with `Xenova/whisper-small` for local transcription
-- [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) (single-threaded core, no SharedArrayBuffer required) for trim + caption burn-in
 - [Document Picture-in-Picture API](https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API) for cross-tab recording control
 - [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) for persistent recording gallery
 - [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) for direct-to-disk saves
