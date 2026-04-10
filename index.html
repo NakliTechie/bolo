@@ -1635,7 +1635,17 @@ function buildCompositeStream() {
 }
 
 // ---------- Recording ----------
+function mimeToExt(mime) {
+  return (mime || '').startsWith('video/mp4') ? 'mp4' : 'webm';
+}
+
 function pickMimeType() {
+  // Try native MP4 (H.264) first — Twitter, WhatsApp, and most social platforms
+  // require MP4. Chrome 129+ on macOS/Windows supports this natively.
+  const mp4 = ['video/mp4;codecs="avc1.42E01E,mp4a.40.2"', 'video/mp4;codecs=avc1', 'video/mp4'];
+  for (const m of mp4) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
   const cands = {
     vp9: ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm'],
     vp8: ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm'],
@@ -1862,7 +1872,7 @@ function pushHistory(blob, mime) {
     mime,
     sizeBytes: blob.size,
     timestamp: new Date().toISOString(),
-    name: filenameBase() + '.webm',
+    name: filenameBase() + '.' + mimeToExt(mime),
     transcript: null,
   };
   S.history.unshift(item);
@@ -1958,7 +1968,7 @@ async function opfsSave(item) {
   const dir = await opfsDir();
   if (!dir) return false;
   // Write blob
-  const fh = await dir.getFileHandle(item.id + '.webm', { create: true });
+  const fh = await dir.getFileHandle(item.id + '.' + mimeToExt(item.mime), { create: true });
   const w = await fh.createWritable();
   await w.write(item.blob);
   await w.close();
@@ -1988,7 +1998,7 @@ async function opfsLoadAll() {
       try {
         const file = await entry.getFile();
         const meta = JSON.parse(await file.text());
-        const blobHandle = await dir.getFileHandle(meta.id + '.webm');
+        const blobHandle = await dir.getFileHandle(meta.id + '.' + mimeToExt(meta.mime));
         const blobFile = await blobHandle.getFile();
         const blob = new Blob([await blobFile.arrayBuffer()], { type: meta.mime || 'video/webm' });
         items.push({ ...meta, blob, persisted: true });
@@ -2000,6 +2010,7 @@ async function opfsLoadAll() {
 async function opfsDelete(id) {
   const dir = await opfsDir();
   if (!dir) return;
+  try { await dir.removeEntry(id + '.mp4'); } catch(e) {}
   try { await dir.removeEntry(id + '.webm'); } catch(e) {}
   try { await dir.removeEntry(id + '.json'); } catch(e) {}
 }
@@ -2009,9 +2020,9 @@ async function opfsEnforceQuota() {
   // Tally on-disk size
   const files = [];
   for await (const entry of dir.values()) {
-    if (entry.kind === 'file' && entry.name.endsWith('.webm')) {
+    if (entry.kind === 'file' && (entry.name.endsWith('.webm') || entry.name.endsWith('.mp4'))) {
       const f = await entry.getFile();
-      files.push({ name: entry.name, id: entry.name.replace(/\.webm$/, ''), size: f.size, lastModified: f.lastModified });
+      files.push({ name: entry.name, id: entry.name.replace(/\.(webm|mp4)$/, ''), size: f.size, lastModified: f.lastModified });
     }
   }
   let total = files.reduce((s, f) => s + f.size, 0);
@@ -2359,7 +2370,7 @@ function renderTranscript() {
   if (!S.transcript) return;
   segCount.textContent = `${S.transcript.length} segments`;
   // Reflect bundled-download state on the action button
-  $('btnDownload').textContent = '↓ Download (.webm + .srt)';
+  $('btnDownload').textContent = `↓ Download (.${mimeToExt(S.recordedMime)} + .srt)`;
   transcriptList.innerHTML = S.transcript.map((s, i) => `
     <div class="seg" data-i="${i}">
       <span class="ts">${fmtTs(s.start)}</span>
@@ -2466,8 +2477,9 @@ $('btnDownload').addEventListener('click', () => {
   if (!S.recordedBlob) return;
   // Use the active history item's pinned name when present so video and sidecar match.
   const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
-  const base = active ? active.name.replace(/\.webm$/i, '') : filenameBase();
-  downloadBlob(S.recordedBlob, base + '.webm');
+  const ext = mimeToExt(S.recordedMime);
+  const base = active ? active.name.replace(/\.(webm|mp4)$/i, '') : filenameBase();
+  downloadBlob(S.recordedBlob, base + '.' + ext);
   // Auto-download sidecar SRT with the same basename so players auto-pick it up.
   if (S.transcript && S.transcript.length) {
     setTimeout(() => downloadBlob(new Blob([toSrt()], { type: 'text/plain' }), base + '.srt'), 250);
