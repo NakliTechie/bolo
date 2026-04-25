@@ -48,6 +48,12 @@ Your recording, transcript, and edits never leave this page. There is no backend
 - [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) for persistent recording gallery
 - [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) for direct-to-disk saves
 
+## Palette
+
+Coloured with **`scandinavia-10 · POLARNATT`** — Tromsø polar night, no sun for weeks; the coolest dark in the library. Polar-night blue-black body, cool snow ink, brick-red REC dot, teal Save action — the clean studio at 4 PM in January.
+
+Palette pulled from [**Rangrez**](https://github.com/NakliTechie/rangrez), the global colour-palette library that backs all NakliTechie projects.
+
 ## Browser support
 
 - **Chrome / Edge 116+** — full feature set including Document PiP cross-tab control and FS API saves
