@@ -576,6 +576,83 @@
   }
   .seg .txt[contenteditable="true"]:focus { background: var(--bg-3); border-radius: 4px; padding: 2px 4px; }
 
+  /* Annotation overlay (SVG on top of playback video). Pointer events only when drawing. */
+  .annot-overlay {
+    position: absolute;
+    pointer-events: none;
+    display: none;
+    z-index: 4;
+    overflow: visible;
+  }
+  .annot-overlay.on { display: block; }
+  .annot-overlay.draw-mode {
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+  .annot-overlay text { user-select: none; }
+
+  /* Annotation sidebar list */
+  .annot-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 4px;
+    font-size: 11px;
+  }
+  .annot-item .annot-icon { color: var(--accent); font-size: 13px; flex-shrink: 0; }
+  .annot-item .annot-desc { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .annot-item .annot-ts { color: var(--text-mute); font-variant-numeric: tabular-nums; font-size: 10px; flex-shrink: 0; }
+  .annot-item .annot-del {
+    background: transparent; border: 1px solid var(--border-2);
+    color: var(--text-mute); cursor: pointer;
+    width: 22px; height: 22px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-family: inherit; flex-shrink: 0;
+  }
+  .annot-item .annot-del:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* AI insights panel — title, summary, clickable chapters */
+  .insight-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+    line-height: 1.3;
+  }
+  .insight-summary {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-bottom: 10px;
+  }
+  .chapters-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .chapter {
+    display: flex;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .chapter:hover { background: var(--bg-3); }
+  .chapter .ts {
+    color: var(--text-mute);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .chapter .ch-title { color: var(--text); flex: 1; }
+
   .progress-wrap {
     display: none;
     margin-top: 10px;
@@ -800,6 +877,8 @@
       <span id="recTimer">00:00</span>
     </div>
     <div class="captions-overlay" id="captionsOverlay"></div>
+    <!-- Annotation overlay — sits over the recordedVideo. Pointer events only when a tool is active. -->
+    <svg class="annot-overlay" id="annotOverlay" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"></svg>
     <div class="countdown" id="countdown"><div class="countdown-num" id="countdownNum">3</div></div>
   </div>
 
@@ -828,6 +907,26 @@
           <label>Camera</label>
           <select id="camDevice"></select>
         </div>
+      </div>
+    </div>
+
+    <!-- Look — background + framing + zoom. Preset bundles, no fiddly sliders. -->
+    <div class="panel" id="panelLook">
+      <h3 class="collapsible">Look <span class="caret">▾</span></h3>
+      <div class="panel-body">
+        <div class="field">
+          <label>Style</label>
+          <div class="chip-row" id="lookChips">
+            <span class="chip on" data-look="none">None</span>
+            <span class="chip" data-look="studio">Studio</span>
+            <span class="chip" data-look="spotlight">Spotlight</span>
+          </div>
+        </div>
+        <label class="toggle-row" style="margin-top:6px">
+          <input type="checkbox" id="followCursorToggle">
+          <span>Follow cursor (auto-zoom)</span>
+        </label>
+        <div class="hint" style="margin-top:6px">Studio adds a dark gradient frame; Spotlight adds a stronger dark vignette with deeper shadow. Follow-cursor zooms gently toward on-screen motion.</div>
       </div>
     </div>
 
@@ -897,6 +996,7 @@
       <div class="actions" id="actionsDone">
         <button class="btn btn-primary" id="btnTranscribe">✨ Generate Captions</button>
         <button class="btn" id="btnDownload">↓ Download</button>
+        <button class="btn hidden" id="btnExportBaked">🎬 Export with overlays burned in</button>
         <button class="btn btn-ghost btn-danger" id="btnDiscard">Start Over</button>
       </div>
     </div>
@@ -915,6 +1015,35 @@
         <button class="btn btn-sm" id="btnExportVtt">VTT</button>
         <button class="btn btn-sm" id="btnExportTxt">TXT</button>
       </div>
+    </div>
+
+    <!-- Annotations — Cap-style draw tools (arrow / box / text) that bake into the export -->
+    <div class="panel hidden" id="panelAnnotations">
+      <h3 class="collapsible">Annotations <span class="count" id="annotCount"></span><span class="caret">▾</span></h3>
+      <div class="panel-body">
+        <div class="field">
+          <label>Draw tool</label>
+          <div class="chip-row" id="annotToolChips">
+            <span class="chip" data-tool="arrow">↗ Arrow</span>
+            <span class="chip" data-tool="box">▭ Box</span>
+            <span class="chip" data-tool="text">🅰 Text</span>
+          </div>
+        </div>
+        <div class="hint" style="margin-bottom:8px">Pick a tool, then drag on the playback to draw. Each annotation is visible for 3 seconds from the moment you drew it.</div>
+        <div id="annotList"></div>
+      </div>
+    </div>
+
+    <!-- AI insights (title + summary + chapters from the transcript) -->
+    <div class="panel hidden" id="panelInsights">
+      <h3>AI insights</h3>
+      <button class="btn" id="btnInsights">✨ Generate title, summary, chapters</button>
+      <div id="insightsBody" style="display:none; margin-top:10px">
+        <div class="insight-title" id="insightTitle"></div>
+        <div class="insight-summary" id="insightSummary"></div>
+        <div class="chapters-list" id="chaptersList"></div>
+      </div>
+      <div class="hint" style="margin-top:8px">Qwen 2.5 0.5B Instruct runs locally on WebGPU — the first run downloads ~350 MB of model weights, then cached forever. Click a chapter to seek.</div>
     </div>
 
     <!-- Status / progress -->
@@ -1005,6 +1134,48 @@
 // Bolo — Browser-Native Screen Recorder
 // ============================================================================
 
+// ---------- Look presets (Cap-style Studio polish — backgrounds + padding + rounded + shadow) ----------
+// Three preset bundles. No fiddly sliders — only intent: "raw" / "polished" / "dramatic".
+// All values are unitless fractions of the canvas dimensions so they scale with source resolution.
+const LOOKS = {
+  none: { label: 'None', padding: 0, radius: 0, shadow: null, bgGrad: null },
+  studio: {
+    label: 'Studio',
+    padding: 0.04,                                          // 4% inset on each side
+    radius: 0.012,                                          // 1.2% of min(inner-w, inner-h)
+    shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.025, offsetY: 0.008 },
+    bgGrad: (ctx, W, H) => {
+      const g = ctx.createLinearGradient(0, 0, W, H);
+      g.addColorStop(0, '#1a2438');
+      g.addColorStop(1, '#0e1824');
+      return g;
+    },
+  },
+  spotlight: {
+    label: 'Spotlight',
+    padding: 0.08,
+    radius: 0.02,
+    shadow: { color: 'rgba(0,0,0,0.75)', blur: 0.05, offsetY: 0.014 },
+    bgGrad: (ctx, W, H) => {
+      const g = ctx.createRadialGradient(W/2, H*0.3, 0, W/2, H*0.5, Math.max(W, H));
+      g.addColorStop(0, '#2a3450');
+      g.addColorStop(0.8, '#060c14');
+      return g;
+    },
+  },
+};
+
+function roundedRectPath(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 // ---------- State machine ----------
 const STATES = ['idle','configuring','countdown','recording','paused','stopped','transcribing','done','error'];
 const S = {
@@ -1015,6 +1186,8 @@ const S = {
   canvasStream: null,
   compositor: null, // { canvas, ctx, rafId }
   overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true },
+  look: 'none',          // 'none' | 'studio' | 'spotlight' — Cap-style preset bundles
+  followCursor: false,   // continuous smart-follow zoom via frame-diff motion centroid
   pipWindow: null,
   devices: { cams: [], mics: [] },
   // Quality is locked to the best supported. The only knobs the user touches
@@ -1037,8 +1210,11 @@ const S = {
   timerInterval: null,
   countdownTimer: null,
   transcript: null,
+  insights: null,       // { title, summary, chapters: [{ time, title }] } — generated by local LLM
+  annotations: [],      // [{ id, type, startTime, endTime, x, y, w, h, text? }] — relative coords 0..1
+  exporting: false,     // re-encode in flight; locks the export button
   audioMeter: null, // { ctx, analyser, data, rafId, sourceNode }
-  history: [],          // [{ id, blob, mime, sizeBytes, timestamp, name, transcript }]
+  history: [],          // [{ id, blob, mime, sizeBytes, timestamp, name, transcript, insights }]
   activeHistoryId: null,
   // Speculative pre-transcription pipeline (model load → audio extract → inference)
   // runs invisibly while the user is "flapping around" deciding what to do.
@@ -1096,6 +1272,7 @@ function setState(next) {
 // Overlay panel additionally hides entirely when its precondition is gone.
 function setSetupPanelsCollapsed(collapsed) {
   $('panelSources').classList.toggle('collapsed', collapsed);
+  $('panelLook').classList.toggle('collapsed', collapsed);
   $('panelSettings').classList.toggle('collapsed', collapsed);
   // Overlay only matters when both screen+webcam are still on
   const overlayApplies = S.sources.screen && S.sources.webcam;
@@ -1156,6 +1333,22 @@ function loadOverlay() {
   try {
     const raw = localStorage.getItem(LS_OVERLAY);
     if (raw) Object.assign(S.overlay, JSON.parse(raw));
+  } catch(e) {}
+}
+// Persist Look preset + follow-cursor toggle
+const LS_LOOK = 'bolo.look.v1';
+function saveLook() {
+  try {
+    localStorage.setItem(LS_LOOK, JSON.stringify({ look: S.look, followCursor: S.followCursor }));
+  } catch(e) {}
+}
+function loadLook() {
+  try {
+    const raw = localStorage.getItem(LS_LOOK);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved.look === 'string' && LOOKS[saved.look]) S.look = saved.look;
+    if (typeof saved.followCursor === 'boolean') S.followCursor = saved.followCursor;
   } catch(e) {}
 }
 // Persist app settings (v2 — quality knobs removed; only language + translate)
@@ -1548,73 +1741,190 @@ function attachWebcamDrag() {
 
 // ---------- Canvas compositor for recording ----------
 function buildCompositeStream() {
-  // If both screen+webcam: composite via canvas. Otherwise pass through the appropriate stream.
+  // Canvas-composite whenever there's something to do on top of pass-through:
+  // both sources combined, a Look preset applied, or follow-cursor zoom on.
+  // Otherwise pass the source track through unchanged (zero-cost).
   const hasScreen = !!S.streams.screen;
   const hasWebcam = !!S.streams.webcam;
+  const lookActive = S.look !== 'none';
+  const followActive = !!S.followCursor && hasScreen;
+  const needsCanvas = (hasScreen && hasWebcam) || lookActive || followActive;
 
   let videoTracks = [];
 
-  if (hasScreen && hasWebcam) {
-    // Create offscreen canvas sized to screen track's settings
-    const st = S.streams.screen.getVideoTracks()[0].getSettings();
-    const W = st.width || 1920;
-    const H = st.height || 1080;
+  if (needsCanvas && (hasScreen || hasWebcam)) {
+    // Canvas matches the primary source resolution. A Look adds padding inside;
+    // the recording stays at native resolution outwardly so codecs / players don't change.
+    let W, H;
+    if (hasScreen) {
+      const st = S.streams.screen.getVideoTracks()[0].getSettings();
+      W = st.width || 1920; H = st.height || 1080;
+    } else {
+      const st = S.streams.webcam.getVideoTracks()[0].getSettings();
+      W = st.width || 1280; H = st.height || 720;
+    }
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d', { alpha: false });
 
-    // Build hidden video elements to drive the canvas
-    const screenVid = document.createElement('video');
-    screenVid.srcObject = S.streams.screen;
-    screenVid.muted = true; screenVid.playsInline = true;
-    screenVid.play();
-    const webcamVid = document.createElement('video');
-    webcamVid.srcObject = S.streams.webcam;
-    webcamVid.muted = true; webcamVid.playsInline = true;
-    webcamVid.play();
+    let screenVid = null, webcamVid = null;
+    if (hasScreen) {
+      screenVid = document.createElement('video');
+      screenVid.srcObject = S.streams.screen;
+      screenVid.muted = true; screenVid.playsInline = true;
+      screenVid.play();
+    }
+    if (hasWebcam) {
+      webcamVid = document.createElement('video');
+      webcamVid.srcObject = S.streams.webcam;
+      webcamVid.muted = true; webcamVid.playsInline = true;
+      webcamVid.play();
+    }
 
     const sizeMap = { s: 0.15, m: 0.25, l: 0.35 };
     const pct = sizeMap[S.overlay.size];
 
+    // ----- Follow-cursor: tiny offscreen canvas for motion-centroid detection.
+    // Sampled at ~5 FPS (every 6th draw at 30 FPS). The cursor position is
+    // smoothed via a low-pass filter so the zoom glides rather than snaps.
+    // Cap can do this from native global mouse hooks; the browser cannot read
+    // cursor position from a getDisplayMedia stream, so we infer it from
+    // frame-to-frame pixel deltas — close enough for "follow what's moving".
+    const motionCanvas = document.createElement('canvas');
+    motionCanvas.width = 64; motionCanvas.height = 36;
+    const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+    let motionPrev = null;
+    const cursor = { x: 0.5, y: 0.5 };
+    let frameCount = 0;
+    const detectMotion = () => {
+      if (!screenVid || !screenVid.videoWidth) return;
+      try {
+        motionCtx.drawImage(screenVid, 0, 0, 64, 36);
+        const cur = motionCtx.getImageData(0, 0, 64, 36).data;
+        if (motionPrev) {
+          let sumX = 0, sumY = 0, sumM = 0;
+          const THRESH = 24;
+          for (let y = 0; y < 36; y++) {
+            for (let x = 0; x < 64; x++) {
+              const i = (y * 64 + x) * 4;
+              const dr = Math.abs(cur[i]   - motionPrev[i]);
+              const dg = Math.abs(cur[i+1] - motionPrev[i+1]);
+              const db = Math.abs(cur[i+2] - motionPrev[i+2]);
+              const m = (dr + dg + db) / 3;
+              if (m > THRESH) { sumX += x * m; sumY += y * m; sumM += m; }
+            }
+          }
+          // Require meaningful motion before steering; otherwise drift back to centre slowly.
+          if (sumM > 400) {
+            const tx = (sumX / sumM) / 64;
+            const ty = (sumY / sumM) / 36;
+            cursor.x = cursor.x * 0.92 + tx * 0.08;
+            cursor.y = cursor.y * 0.92 + ty * 0.08;
+          } else {
+            cursor.x = cursor.x * 0.98 + 0.5 * 0.02;
+            cursor.y = cursor.y * 0.98 + 0.5 * 0.02;
+          }
+        }
+        motionPrev = cur;
+      } catch(e) {}
+    };
+
+    const drawScreenInto = (rx, ry, rw, rh) => {
+      // With follow-cursor: crop a 1/zoom window centred on the smoothed cursor
+      // and stretch it to the destination rect. Without: straight draw.
+      if (S.followCursor && screenVid.videoWidth) {
+        const zoom = 1.4;
+        const srcW = screenVid.videoWidth, srcH = screenVid.videoHeight;
+        const cropW = srcW / zoom, cropH = srcH / zoom;
+        let sx = cursor.x * srcW - cropW / 2;
+        let sy = cursor.y * srcH - cropH / 2;
+        sx = Math.max(0, Math.min(srcW - cropW, sx));
+        sy = Math.max(0, Math.min(srcH - cropH, sy));
+        ctx.drawImage(screenVid, sx, sy, cropW, cropH, rx, ry, rw, rh);
+      } else {
+        ctx.drawImage(screenVid, rx, ry, rw, rh);
+      }
+    };
+
     const draw = () => {
       if (!S.compositor) return;
       try {
-        ctx.drawImage(screenVid, 0, 0, W, H);
-        const ww = Math.floor(W * pct);
-        const wh = (S.overlay.shape === 'circle') ? ww : Math.floor(ww * (9/16));
-        // Center the webcam at (x%, y%) of the canvas, then clamp inside.
-        let wx = Math.floor((S.overlay.x / 100) * W - ww / 2);
-        let wy = Math.floor((S.overlay.y / 100) * H - wh / 2);
-        wx = Math.max(0, Math.min(W - ww, wx));
-        wy = Math.max(0, Math.min(H - wh, wy));
+        const look = LOOKS[S.look] || LOOKS.none;
+        const lookOn = S.look !== 'none';
 
+        // Sample motion at ~5 FPS when follow-cursor is on.
+        frameCount++;
+        if (S.followCursor && hasScreen && (frameCount % 6 === 0)) detectMotion();
+
+        // Inner rect (Look padding eats into it). Background paint if Look active.
+        let ix = 0, iy = 0, iw = W, ih = H;
+        if (lookOn) {
+          ctx.fillStyle = look.bgGrad(ctx, W, H);
+          ctx.fillRect(0, 0, W, H);
+          const padX = Math.floor(W * look.padding);
+          const padY = Math.floor(H * look.padding);
+          ix = padX; iy = padY;
+          iw = W - padX * 2; ih = H - padY * 2;
+          // Drop shadow: paint a black rounded rect first so its shadow renders
+          // behind the eventual content; then re-clip and draw on top.
+          const r = Math.min(iw, ih) * look.radius;
+          ctx.save();
+          ctx.shadowColor = look.shadow.color;
+          ctx.shadowBlur = Math.min(W, H) * look.shadow.blur;
+          ctx.shadowOffsetY = Math.min(W, H) * look.shadow.offsetY;
+          ctx.fillStyle = '#000';
+          roundedRectPath(ctx, ix, iy, iw, ih, r);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Clip to inner rect (rounded if Look) and draw the primary source.
         ctx.save();
-        // Clip for rounded/circle
-        if (S.overlay.shape === 'circle') {
-          const r = Math.min(ww, wh) / 2;
-          const cx = wx + ww/2, cy = wy + wh/2;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI*2);
-          ctx.clip();
-        } else if (S.overlay.shape === 'rounded') {
-          const r = Math.min(ww, wh) * 0.1;
-          ctx.beginPath();
-          ctx.moveTo(wx+r, wy);
-          ctx.arcTo(wx+ww, wy, wx+ww, wy+wh, r);
-          ctx.arcTo(wx+ww, wy+wh, wx, wy+wh, r);
-          ctx.arcTo(wx, wy+wh, wx, wy, r);
-          ctx.arcTo(wx, wy, wx+ww, wy, r);
-          ctx.closePath();
+        if (lookOn) {
+          const r = Math.min(iw, ih) * look.radius;
+          roundedRectPath(ctx, ix, iy, iw, ih, r);
           ctx.clip();
         }
-        if (S.overlay.mirror) {
-          ctx.translate(wx+ww, wy);
-          ctx.scale(-1, 1);
-          ctx.drawImage(webcamVid, 0, 0, ww, wh);
-        } else {
-          ctx.drawImage(webcamVid, wx, wy, ww, wh);
+        if (hasScreen) {
+          drawScreenInto(ix, iy, iw, ih);
+        } else if (hasWebcam) {
+          ctx.drawImage(webcamVid, ix, iy, iw, ih);
         }
-        ctx.restore();
+
+        // Webcam picture-in-picture (only when both sources present).
+        // Position is a percentage of the inner rect so the overlay still hugs
+        // the corner of the framed content under any Look.
+        if (hasScreen && hasWebcam) {
+          const ww = Math.floor(iw * pct);
+          const wh = (S.overlay.shape === 'circle') ? ww : Math.floor(ww * (9/16));
+          let wx = Math.floor((S.overlay.x / 100) * iw - ww / 2) + ix;
+          let wy = Math.floor((S.overlay.y / 100) * ih - wh / 2) + iy;
+          wx = Math.max(ix, Math.min(ix + iw - ww, wx));
+          wy = Math.max(iy, Math.min(iy + ih - wh, wy));
+
+          ctx.save();
+          if (S.overlay.shape === 'circle') {
+            const r = Math.min(ww, wh) / 2;
+            const cx = wx + ww/2, cy = wy + wh/2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI*2);
+            ctx.clip();
+          } else if (S.overlay.shape === 'rounded') {
+            const r = Math.min(ww, wh) * 0.1;
+            roundedRectPath(ctx, wx, wy, ww, wh, r);
+            ctx.clip();
+          }
+          if (S.overlay.mirror) {
+            ctx.translate(wx + ww, wy);
+            ctx.scale(-1, 1);
+            ctx.drawImage(webcamVid, 0, 0, ww, wh);
+          } else {
+            ctx.drawImage(webcamVid, wx, wy, ww, wh);
+          }
+          ctx.restore();
+        }
+
+        ctx.restore(); // lift inner-rect clip
       } catch(e) {}
       S.compositor.rafId = requestAnimationFrame(draw);
     };
@@ -1822,6 +2132,12 @@ function onRecorderStopped() {
   recordedVideo.src = URL.createObjectURL(S.recordedBlob);
   recordedVideo.classList.add('on');
   panelDone.classList.remove('hidden');
+  // Reveal the Annotations panel and refresh its empty-state hint.
+  $('panelAnnotations').classList.remove('hidden');
+  S.annotations = [];
+  renderAnnotList();
+  // Wait one frame so getBoundingClientRect reflects the .on transition before syncing
+  requestAnimationFrame(() => syncAnnotOverlay());
   // Collapse the setup panels (header still visible) and free the camera/mic/screen
   stopAllSources();
   setSetupPanelsCollapsed(true);
@@ -1849,7 +2165,16 @@ function resetToIdle() {
   recordedVideo.classList.remove('on');
   panelDone.classList.add('hidden');
   panelTranscript.classList.add('hidden');
+  $('panelInsights').classList.add('hidden');
+  $('insightsBody').style.display = 'none';
+  $('panelAnnotations').classList.add('hidden');
+  $('annotOverlay').classList.remove('on');
+  $('btnExportBaked').classList.add('hidden');
   S.transcript = null;
+  S.insights = null;
+  S.annotations = [];
+  annotDrawTool = null;
+  updateAnnotToolChips();
   captionsOverlay.textContent = '';
   captionsOverlay.classList.remove('on');
   hideProgress();
@@ -1877,6 +2202,8 @@ function pushHistory(blob, mime) {
     timestamp: new Date().toISOString(),
     name: filenameBase() + '.' + mimeToExt(mime),
     transcript: null,
+    insights: null,
+    annotations: [],
   };
   S.history.unshift(item);
   S.activeHistoryId = item.id;
@@ -1912,20 +2239,32 @@ function loadHistoryItem(id) {
   previewVideo.classList.remove('on');
   webcamPreview.classList.remove('on');
   panelDone.classList.remove('hidden');
+  $('panelAnnotations').classList.remove('hidden');
   setSetupPanelsCollapsed(true);
-  S.transcript = item.transcript ? JSON.parse(JSON.stringify(item.transcript)) : null;
+  S.transcript   = item.transcript   ? JSON.parse(JSON.stringify(item.transcript))   : null;
+  S.insights     = item.insights     ? JSON.parse(JSON.stringify(item.insights))     : null;
+  S.annotations  = item.annotations  ? JSON.parse(JSON.stringify(item.annotations))  : [];
+  renderAnnotList();
+  // Wait one frame so layout settles before we sync the overlay to the video rect
+  requestAnimationFrame(() => { syncAnnotOverlay(); renderAnnotations(); });
   if (S.transcript) {
     renderTranscript();
     panelTranscript.classList.remove('hidden');
     $('btnTranscribe').textContent = '✨ Re-transcribe';
+    $('panelInsights').classList.remove('hidden');
+    if (S.insights) renderInsights();
+    else { $('insightsBody').style.display = 'none'; $('btnInsights').textContent = '✨ Generate title, summary, chapters'; }
   } else {
     panelTranscript.classList.add('hidden');
+    $('panelInsights').classList.add('hidden');
+    $('insightsBody').style.display = 'none';
     $('btnTranscribe').textContent = '✨ Generate Captions';
     $('btnDownload').textContent = '↓ Download';
     // Reloaded a recording without captions — start the pre-transcribe pipeline
     invalidatePreTranscribe();
     startPreTranscribe();
   }
+  updateExportButtonVisibility();
   setState('done');
   updateRecordButton();
   renderHistory();
@@ -1940,8 +2279,17 @@ function deleteHistoryItem(id) {
     S.recordedBlob = null;
     S.activeHistoryId = null;
     S.transcript = null;
+    S.insights = null;
+    S.annotations = [];
+    annotDrawTool = null;
+    updateAnnotToolChips();
+    $('btnExportBaked').classList.add('hidden');
+    $('panelAnnotations').classList.add('hidden');
+    $('annotOverlay').classList.remove('on');
     panelDone.classList.add('hidden');
     panelTranscript.classList.add('hidden');
+    $('panelInsights').classList.add('hidden');
+    $('insightsBody').style.display = 'none';
     captionsOverlay.textContent = '';
     captionsOverlay.classList.remove('on');
     setState(S.sources.screen || S.sources.webcam || S.sources.mic ? 'configuring' : 'idle');
@@ -1984,6 +2332,8 @@ async function opfsSave(item) {
     timestamp: item.timestamp,
     sizeBytes: item.sizeBytes,
     transcript: item.transcript,
+    insights: item.insights || null,
+    annotations: item.annotations || [],
     mime: item.mime,
   }));
   await mw.close();
@@ -2348,6 +2698,14 @@ async function transcribeRecording() {
     S.transcript = segments;
     renderTranscript();
     panelTranscript.classList.remove('hidden');
+    // Reveal the AI insights panel — the button alone, body hidden until generated.
+    // If the active recording already has cached insights (loaded from history),
+    // renderInsights below will reveal the body.
+    $('panelInsights').classList.remove('hidden');
+    if (S.insights) renderInsights();
+    else { $('insightsBody').style.display = 'none'; $('btnInsights').textContent = '✨ Generate title, summary, chapters'; }
+    // Now that we have captions, the burn-in export button is available
+    updateExportButtonVisibility();
     // Save transcript onto the active history item, and re-persist to OPFS
     if (S.activeHistoryId) {
       const active = S.history.find(h => h.id === S.activeHistoryId);
@@ -2404,6 +2762,656 @@ function fmtTs(sec) {
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---------- AI insights (local LLM via Transformers.js v4 + WebGPU) ----------
+// A second blob-URL worker runs Qwen 2.5 0.5B Instruct on WebGPU and produces
+// a short title + one-paragraph summary + clickable chapter markers from the
+// existing Whisper transcript. Same single-file / nothing-leaves-this-page
+// guarantee as the rest of Bolo — the only network call is the one-time model
+// download from the HF CDN, then it lives in browser Cache Storage forever.
+const LLM_MODEL = 'onnx-community/Qwen2.5-0.5B-Instruct';
+
+const llmWorkerSrc = `
+import {
+  AutoTokenizer,
+  AutoModelForCausalLM,
+  TextStreamer,
+  InterruptableStoppingCriteria,
+  env,
+} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4/+esm';
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+
+let tokenizer = null, model = null, currentModel = null;
+const stopping = new InterruptableStoppingCriteria();
+
+self.addEventListener('message', async (e) => {
+  const { id, type, model: modelId, prompt, options } = e.data;
+  try {
+    if (type === 'load') {
+      if (tokenizer && model && currentModel === modelId) {
+        self.postMessage({ id, type: 'ready' });
+        return;
+      }
+      tokenizer = null; model = null; currentModel = null;
+      tokenizer = await AutoTokenizer.from_pretrained(modelId, {
+        progress_callback: p => self.postMessage({ id, type: 'progress', data: p }),
+      });
+      model = await AutoModelForCausalLM.from_pretrained(modelId, {
+        dtype: 'q4f16', device: 'webgpu',
+        progress_callback: p => self.postMessage({ id, type: 'progress', data: p }),
+      });
+      // Warmup — compiles WebGPU shaders so the first user-facing generate
+      // isn't a 5-second stall.
+      const wu = tokenizer('a', { return_tensors: 'pt' });
+      await model.generate({ ...wu, max_new_tokens: 1 });
+      currentModel = modelId;
+      self.postMessage({ id, type: 'ready' });
+    } else if (type === 'generate') {
+      if (!model) throw new Error('Model not loaded');
+      stopping.reset();
+      const inputs = tokenizer.apply_chat_template(prompt, {
+        add_generation_prompt: true,
+        return_dict: true,
+        return_tensors: 'pt',
+      });
+      const streamer = new TextStreamer(tokenizer, {
+        skip_prompt: true,
+        skip_special_tokens: true,
+        callback_function: (tok) => self.postMessage({ id, type: 'token', token: tok }),
+      });
+      const output = await model.generate({
+        ...inputs,
+        max_new_tokens: (options && options.maxNewTokens) || 200,
+        do_sample: false,
+        streamer,
+        stopping_criteria: stopping,
+      });
+      // Strip the prompt prefix from the decoded output
+      const decoded = tokenizer.batch_decode(
+        output.slice(null, [inputs.input_ids.dims[1], null]),
+        { skip_special_tokens: true }
+      );
+      self.postMessage({ id, type: 'complete', text: (decoded[0] || '').trim() });
+    } else if (type === 'stop') {
+      stopping.interrupt();
+    }
+  } catch (err) {
+    self.postMessage({ id, type: 'error', error: (err && err.message) || String(err) });
+  }
+});
+`;
+
+let llmWorker = null;
+let llmLoadedModel = null;
+const llmPending = new Map();
+let llmNextId = 1;
+
+function getLlmWorker() {
+  if (llmWorker) return llmWorker;
+  const blob = new Blob([llmWorkerSrc], { type: 'application/javascript' });
+  const url = URL.createObjectURL(blob);
+  const w = new Worker(url, { type: 'module' });
+  // CLAUDE.md rule: blob-URL module workers fail silently without onerror
+  w.addEventListener('error', (e) => {
+    console.error('LLM worker error:', e.message, e.filename, e.lineno);
+    for (const [, p] of llmPending) { try { p.reject(new Error('LLM worker crashed: ' + e.message)); } catch(_){} }
+    llmPending.clear();
+    llmWorker = null;
+    llmLoadedModel = null;
+  });
+  w.addEventListener('messageerror', (e) => console.error('LLM worker messageerror', e));
+  w.addEventListener('message', (e) => {
+    const { id, type, data, token, text, error } = e.data;
+    const p = llmPending.get(id);
+    if (!p) return;
+    if (type === 'progress') { p.onProgress && p.onProgress(data); return; }
+    if (type === 'token')    { p.onToken && p.onToken(token); return; }
+    llmPending.delete(id);
+    if (type === 'error') p.reject(new Error(error));
+    else if (type === 'complete') p.resolve(text);
+    else p.resolve(null);
+  });
+  llmWorker = w;
+  return w;
+}
+
+function llmWorkerCall(type, payload, callbacks = {}) {
+  const w = getLlmWorker();
+  const id = llmNextId++;
+  return new Promise((resolve, reject) => {
+    llmPending.set(id, { resolve, reject, onProgress: callbacks.onProgress, onToken: callbacks.onToken });
+    w.postMessage({ id, type, ...payload });
+  });
+}
+
+async function loadLlm(onProgress) {
+  if (llmLoadedModel === LLM_MODEL) return;
+  await llmWorkerCall('load', { model: LLM_MODEL }, { onProgress });
+  llmLoadedModel = LLM_MODEL;
+}
+
+async function llmGenerate(messages, opts) {
+  return llmWorkerCall('generate', { prompt: messages, options: opts || {} }, {});
+}
+
+// Squash the transcript into prompt-ready text. Keep timestamps so the
+// chapter prompt can reference real positions in the recording.
+function buildTranscriptForPrompt(segments, maxChars = 8000) {
+  const lines = segments.map(s => {
+    const m = Math.floor(s.start / 60), sec = Math.floor(s.start % 60);
+    const ts = `[${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}]`;
+    return `${ts} ${s.text}`;
+  });
+  let text = lines.join('\n');
+  if (text.length > maxChars) text = text.slice(0, maxChars) + '\n...';
+  return text;
+}
+
+function parseChapters(raw) {
+  const out = [];
+  for (const line of raw.split('\n')) {
+    const m = line.trim().match(/^(?:\*|-|•)?\s*(\d{1,2}):(\d{2})\s+(.+?)\s*$/);
+    if (!m) continue;
+    const sec = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    const title = m[3].replace(/^["']|["']$/g, '').replace(/\.$/, '');
+    if (title) out.push({ time: sec, title });
+  }
+  return out;
+}
+
+async function generateInsights() {
+  if (!S.transcript || !S.transcript.length) return;
+  const btn = $('btnInsights');
+  btn.disabled = true;
+  btn.textContent = '⏳ Loading model…';
+  hideWarning();
+
+  try {
+    let lastPct = -1;
+    await loadLlm((p) => {
+      if (p.status === 'progress') {
+        const pct = Math.round(p.progress || 0);
+        if (pct > lastPct + 4) {
+          lastPct = pct;
+          setProgress(pct / 100, `Downloading ${p.file || 'model'}… ${pct}%`);
+        }
+      } else if (p.status === 'loading') {
+        setProgress(0.95, 'Loading model into memory…');
+      } else if (p.status === 'ready') {
+        setProgress(1, 'Model ready');
+      }
+    });
+    btn.textContent = '⏳ Writing title…';
+
+    const tx = buildTranscriptForPrompt(S.transcript);
+
+    const title = (await llmGenerate([
+      { role: 'system', content: 'You write concise titles for screen recordings. Output exactly one line, 4-10 words, no quotes, no markdown, no trailing period.' },
+      { role: 'user',   content: `Transcript:\n\n${tx}\n\nTitle:` },
+    ], { maxNewTokens: 30 })).split('\n')[0].replace(/^["']|["']$/g, '').replace(/\.$/, '').trim();
+
+    btn.textContent = '⏳ Writing summary…';
+    const summary = (await llmGenerate([
+      { role: 'system', content: 'You write short summaries of screen recordings. Output one paragraph, 2-3 sentences, plain text only, no markdown, no bullet points.' },
+      { role: 'user',   content: `Transcript:\n\n${tx}\n\nSummary:` },
+    ], { maxNewTokens: 140 })).trim();
+
+    btn.textContent = '⏳ Finding chapters…';
+    const chapRaw = await llmGenerate([
+      { role: 'system', content: 'You produce chapter markers for screen recordings. Output 3-6 lines, each in the EXACT form "MM:SS Title" with no bullets, no quotes, no extra text. Pick natural topic shifts grounded in the timestamps from the transcript. Only output the chapter lines.' },
+      { role: 'user',   content: `Transcript:\n\n${tx}\n\nChapters:` },
+    ], { maxNewTokens: 220 });
+    const chapters = parseChapters(chapRaw);
+
+    S.insights = { title, summary, chapters };
+    renderInsights();
+
+    if (S.activeHistoryId) {
+      const active = S.history.find(h => h.id === S.activeHistoryId);
+      if (active) {
+        active.insights = JSON.parse(JSON.stringify(S.insights));
+        opfsSave(active).catch(() => {});
+      }
+    }
+
+    setProgress(1, 'Insights ready');
+    setTimeout(hideProgress, 600);
+    btn.textContent = '✨ Regenerate';
+    btn.disabled = false;
+  } catch (e) {
+    console.error('Insights failed', e);
+    showWarning('Insights failed: ' + e.message);
+    btn.textContent = '✨ Generate title, summary, chapters';
+    btn.disabled = false;
+    hideProgress();
+  }
+}
+
+function renderInsights() {
+  if (!S.insights) return;
+  $('insightTitle').textContent = S.insights.title || '';
+  $('insightSummary').textContent = S.insights.summary || '';
+  const chaps = S.insights.chapters || [];
+  $('chaptersList').innerHTML = chaps.length === 0
+    ? '<div class="hint">No chapters detected.</div>'
+    : chaps.map(c => `<div class="chapter" data-time="${c.time}"><span class="ts">${fmtTs(c.time)}</span><span class="ch-title">${escapeHtml(c.title)}</span></div>`).join('');
+  $('chaptersList').querySelectorAll('.chapter').forEach(el => {
+    el.addEventListener('click', () => {
+      recordedVideo.currentTime = parseInt(el.dataset.time, 10);
+      recordedVideo.play();
+    });
+  });
+  $('insightsBody').style.display = 'block';
+  $('panelInsights').classList.remove('hidden');
+  $('btnInsights').textContent = '✨ Regenerate';
+}
+
+// ---------- Burn-in export (captions + annotations baked into a new WebM/MP4) ----------
+// Honest postmortem in commit a75474b: @ffmpeg/ffmpeg 0.12.x cannot be loaded
+// cross-origin from a single-file deployment — its internal classWorker has
+// relative imports that don't resolve from a blob URL. The browser-only path
+// that DOES work is to re-encode the recording in real time using the platform
+// MediaRecorder we already trust: a hidden source <video> plays the recording,
+// each frame composites onto a canvas with overlays painted on top, and the
+// canvas captureStream feeds a new MediaRecorder. Audio passes through via
+// srcVid.captureStream().getAudioTracks() — no separate audio handling, no
+// AudioContext, no library.
+//
+// Cost: ~1× real-time (a 5-minute recording takes ~5 minutes to bake).
+// Benefit: zero new dependencies, single HTML file stays single, the output
+// works on YouTube / Twitter / embedded players where sidecar SRT doesn't.
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > maxWidth && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function drawCaptionOnCanvas(ctx, text, W, H) {
+  if (!text) return;
+  const fontSize = Math.max(20, Math.floor(H * 0.04));
+  ctx.save();
+  ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const maxWidth = W * 0.85;
+  const lines = wrapCanvasText(ctx, text, maxWidth);
+  const lineH = fontSize * 1.3;
+  const padX = fontSize * 0.7, padY = fontSize * 0.5;
+  const boxH = lines.length * lineH + padY * 2;
+  const boxW = Math.min(maxWidth + padX * 2, Math.max(...lines.map(l => ctx.measureText(l).width)) + padX * 2);
+  const boxX = (W - boxW) / 2;
+  const boxY = H - boxH - H * 0.07;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+  roundedRectPath(ctx, boxX, boxY, boxW, boxH, fontSize * 0.25);
+  ctx.fill();
+
+  ctx.fillStyle = 'white';
+  lines.forEach((line, i) => {
+    ctx.fillText(line, W / 2, boxY + padY + (i + 0.5) * lineH);
+  });
+  ctx.restore();
+}
+
+// Annotation renderer (stub filled in by the annotations task; this is called from bakeRecording
+// so the function shape needs to exist now). Coords on annotations are relative to the source
+// rect (0..1) so they survive resolution changes.
+function drawAnnotationOnCanvas(ctx, a, W, H) {
+  if (!a) return;
+  const x = a.x * W, y = a.y * H, w = a.w * W, h = a.h * H;
+  const accent = '#d8482a';
+  const lineWidth = Math.max(3, Math.floor(Math.min(W, H) * 0.004));
+  ctx.save();
+  ctx.strokeStyle = accent;
+  ctx.fillStyle = accent;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (a.type === 'box') {
+    ctx.strokeRect(x, y, w, h);
+  } else if (a.type === 'arrow') {
+    // Arrow from (x,y) to (x+w, y+h)
+    const x1 = x, y1 = y, x2 = x + w, y2 = y + h;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    // Arrowhead
+    const ang = Math.atan2(y2 - y1, x2 - x1);
+    const head = Math.max(14, lineWidth * 4);
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7));
+    ctx.lineTo(x2 - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7));
+    ctx.closePath();
+    ctx.fill();
+  } else if (a.type === 'text' && a.text) {
+    const fontSize = Math.max(18, Math.floor(H * 0.03));
+    ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const padX = fontSize * 0.6, padY = fontSize * 0.35;
+    const measured = ctx.measureText(a.text);
+    const bgW = measured.width + padX * 2;
+    const bgH = fontSize + padY * 2;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+    roundedRectPath(ctx, x, y, bgW, bgH, fontSize * 0.25);
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.fillText(a.text, x + padX, y + padY);
+  }
+  ctx.restore();
+}
+
+async function bakeRecording({ withCaptions, withAnnotations, onProgress }) {
+  if (!S.recordedBlob) throw new Error('No recording to export');
+
+  // 1) Source video — hidden, plays through end-to-end. Muted so the user's
+  // speakers don't blast; the audio track in the stream is still live.
+  const srcVid = document.createElement('video');
+  srcVid.src = URL.createObjectURL(S.recordedBlob);
+  srcVid.muted = true;
+  srcVid.playsInline = true;
+  await new Promise((resolve, reject) => {
+    srcVid.addEventListener('loadedmetadata', resolve, { once: true });
+    srcVid.addEventListener('error', () => reject(new Error('Failed to load recording')), { once: true });
+  });
+
+  const W = srcVid.videoWidth, H = srcVid.videoHeight;
+  if (!W || !H) { URL.revokeObjectURL(srcVid.src); throw new Error('Recording has no video dimensions'); }
+  const duration = isFinite(srcVid.duration) ? srcVid.duration : 0;
+
+  // 2) Composition canvas — same dimensions so the output keeps native resolution.
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  // 3) Combined stream: canvas video + source audio.
+  const srcStream = srcVid.captureStream();
+  const audioTracks = srcStream.getAudioTracks();
+  const canvasStream = canvas.captureStream(30);
+  const combined = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...audioTracks,
+  ]);
+
+  const mime = pickMimeType();
+  const recorder = new MediaRecorder(combined, { mimeType: mime });
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const donePromise = new Promise(resolve => {
+    recorder.onstop = () => resolve(new Blob(chunks, { type: mime }));
+  });
+
+  let alive = true;
+  const drawOne = () => {
+    if (!alive) return;
+    try {
+      ctx.drawImage(srcVid, 0, 0, W, H);
+      const t = srcVid.currentTime;
+      if (withCaptions && S.transcript) {
+        const seg = S.transcript.find(s => t >= s.start && t <= s.end);
+        if (seg && seg.text) drawCaptionOnCanvas(ctx, seg.text, W, H);
+      }
+      if (withAnnotations && S.annotations && S.annotations.length) {
+        for (const a of S.annotations) {
+          if (t >= a.startTime && t <= a.endTime) drawAnnotationOnCanvas(ctx, a, W, H);
+        }
+      }
+      if (onProgress && duration > 0) {
+        onProgress(Math.min(1, t / duration), `Exporting ${fmtTs(t)} / ${fmtTs(duration)}…`);
+      }
+    } catch(e) { /* drawImage occasionally throws between frames — ignore */ }
+  };
+
+  recorder.start(1000);
+  try { await srcVid.play(); } catch(e) { alive = false; URL.revokeObjectURL(srcVid.src); throw e; }
+
+  if (typeof srcVid.requestVideoFrameCallback === 'function') {
+    const loop = () => {
+      if (!alive) return;
+      drawOne();
+      srcVid.requestVideoFrameCallback(loop);
+    };
+    srcVid.requestVideoFrameCallback(loop);
+  } else {
+    // rAF fallback for browsers without rVFC
+    const loop = () => {
+      if (!alive) return;
+      drawOne();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  await new Promise(resolve => srcVid.addEventListener('ended', resolve, { once: true }));
+  // Paint one final frame so the last segment doesn't get cut off
+  drawOne();
+  alive = false;
+  try { recorder.stop(); } catch(e) {}
+  const blob = await donePromise;
+  URL.revokeObjectURL(srcVid.src);
+  return blob;
+}
+
+async function exportWithOverlays() {
+  if (!S.recordedBlob) return;
+  if (S.exporting) return;
+  const hasCap = !!(S.transcript && S.transcript.length);
+  const hasAnn = !!(S.annotations && S.annotations.length);
+  if (!hasCap && !hasAnn) return;
+  const btn = $('btnExportBaked');
+  const origLabel = btn.textContent;
+  S.exporting = true;
+  btn.disabled = true;
+  btn.textContent = '🎬 Exporting…';
+  hideWarning();
+  try {
+    const blob = await bakeRecording({
+      withCaptions: hasCap,
+      withAnnotations: hasAnn,
+      onProgress: (frac, msg) => setProgress(frac, msg),
+    });
+    setProgress(1, 'Export ready');
+    setTimeout(hideProgress, 800);
+    const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
+    const base = active ? active.name.replace(/\.(webm|mp4)$/i, '') : filenameBase();
+    const ext = mimeToExt(S.recordedMime);
+    downloadBlob(blob, base + '-burned.' + ext);
+    btn.textContent = '✓ Exported — click to redo';
+    setTimeout(() => { btn.textContent = origLabel; }, 4000);
+  } catch (e) {
+    console.error('Export failed', e);
+    showWarning('Export failed: ' + e.message);
+    btn.textContent = origLabel;
+    hideProgress();
+  } finally {
+    S.exporting = false;
+    btn.disabled = false;
+  }
+}
+
+// Reveal / hide the export button based on what's bakeable for the current recording.
+function updateExportButtonVisibility() {
+  const btn = $('btnExportBaked');
+  if (!btn) return;
+  const hasCap = !!(S.transcript && S.transcript.length);
+  const hasAnn = !!(S.annotations && S.annotations.length);
+  const canExport = !!S.recordedBlob && (hasCap || hasAnn);
+  btn.classList.toggle('hidden', !canExport);
+  // Update label to reflect what's actually being baked
+  if (canExport) {
+    if (hasCap && hasAnn)       btn.textContent = '🎬 Export with captions + annotations burned in';
+    else if (hasCap)            btn.textContent = '🎬 Export with captions burned in';
+    else                        btn.textContent = '🎬 Export with annotations burned in';
+  }
+}
+
+// ---------- Annotations (post-record arrow / box / text, baked into the export) ----------
+// SVG overlay sits on top of the recordedVideo. Coordinates on each annotation are
+// relative (0..1) to the SOURCE video dimensions, so they survive any future resolution
+// changes and re-render correctly when the playback is letterboxed in the stage.
+
+const ANNOT_DURATION_SEC = 3; // default visibility window from the moment you drew it
+let annotDrawTool = null;     // 'arrow' | 'box' | 'text' | null
+let annotDrawing = null;      // { x0, y0, type } while a drag is in flight
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+// Position the SVG overlay exactly on top of the recordedVideo's visible content
+// area. The video is letterboxed inside the stage when aspect ratios differ, so
+// we read the bounding rect rather than assuming the stage's bounds.
+function syncAnnotOverlay() {
+  const svg = $('annotOverlay');
+  if (!recordedVideo.classList.contains('on') || !recordedVideo.videoWidth) {
+    svg.classList.remove('on');
+    return;
+  }
+  const stageRect = stage.getBoundingClientRect();
+  const vRect = recordedVideo.getBoundingClientRect();
+  // The video element's bounding rect IS the displayed video area in Bolo's CSS
+  // (max-width/max-height on a flex-centered child preserves aspect). Use it directly.
+  svg.style.left   = (vRect.left - stageRect.left) + 'px';
+  svg.style.top    = (vRect.top  - stageRect.top)  + 'px';
+  svg.style.width  = vRect.width  + 'px';
+  svg.style.height = vRect.height + 'px';
+  svg.setAttribute('viewBox', `0 0 ${recordedVideo.videoWidth} ${recordedVideo.videoHeight}`);
+  svg.classList.add('on');
+}
+
+function pointerToLocal(e) {
+  const svg = $('annotOverlay');
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  const m = svg.getScreenCTM();
+  if (!m) return { x: 0, y: 0 };
+  const local = pt.matrixTransform(m.inverse());
+  return { x: local.x, y: local.y };
+}
+
+function renderAnnotations() {
+  const svg = $('annotOverlay');
+  if (!svg) return;
+  // Preserve in-flight preview element across re-renders
+  const preview = svg.querySelector('#__annPreview');
+  svg.innerHTML = '';
+  if (preview) svg.appendChild(preview);
+  if (!recordedVideo.videoWidth) return;
+  const t = recordedVideo.currentTime;
+  const W = recordedVideo.videoWidth, H = recordedVideo.videoHeight;
+  const accent = '#d8482a';
+  const lineWidth = Math.max(4, Math.floor(Math.min(W, H) * 0.005));
+  for (const a of (S.annotations || [])) {
+    if (t < a.startTime || t > a.endTime) continue;
+    if (a.type === 'box') {
+      svg.appendChild(svgEl('rect', {
+        x: a.x * W, y: a.y * H, width: a.w * W, height: a.h * H,
+        fill: 'none', stroke: accent, 'stroke-width': lineWidth,
+      }));
+    } else if (a.type === 'arrow') {
+      const x1 = a.x * W, y1 = a.y * H;
+      const x2 = (a.x + a.w) * W, y2 = (a.y + a.h) * H;
+      svg.appendChild(svgEl('line', {
+        x1, y1, x2, y2, stroke: accent,
+        'stroke-width': lineWidth, 'stroke-linecap': 'round',
+      }));
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      const head = Math.max(20, lineWidth * 4);
+      const pts = [
+        [x2, y2],
+        [x2 - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7)],
+        [x2 - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7)],
+      ].map(p => p.map(n => n.toFixed(1)).join(',')).join(' ');
+      svg.appendChild(svgEl('polygon', { points: pts, fill: accent }));
+    } else if (a.type === 'text' && a.text) {
+      const fontSize = Math.max(20, Math.floor(H * 0.03));
+      const tx = a.x * W, ty = a.y * H;
+      const text = svgEl('text', {
+        x: tx + fontSize * 0.6, y: ty + fontSize * 1.1,
+        fill: 'white', 'font-size': fontSize, 'font-weight': '700',
+        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+      });
+      text.textContent = a.text;
+      // Append temporarily to measure, then place a backdrop, then re-append text above.
+      svg.appendChild(text);
+      let bbox; try { bbox = text.getBBox(); } catch(e) { bbox = { x: tx, y: ty, width: a.text.length * fontSize * 0.6, height: fontSize * 1.4 }; }
+      text.remove();
+      svg.appendChild(svgEl('rect', {
+        x: bbox.x - fontSize * 0.5, y: bbox.y - fontSize * 0.35,
+        width: bbox.width + fontSize, height: bbox.height + fontSize * 0.7,
+        fill: 'rgba(0, 0, 0, 0.78)', rx: fontSize * 0.25,
+      }));
+      svg.appendChild(text);
+    }
+  }
+}
+
+function updateAnnotToolChips() {
+  document.querySelectorAll('#annotToolChips .chip').forEach(c => {
+    c.classList.toggle('on', c.dataset.tool === annotDrawTool);
+  });
+  $('annotOverlay').classList.toggle('draw-mode', annotDrawTool !== null);
+}
+
+function startAnnotDraw(tool) {
+  annotDrawTool = (annotDrawTool === tool) ? null : tool;
+  updateAnnotToolChips();
+}
+
+function addAnnotation(a) {
+  a.id = 'ann_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  if (!S.annotations) S.annotations = [];
+  S.annotations.push(a);
+  renderAnnotations();
+  renderAnnotList();
+  persistAnnotations();
+  updateExportButtonVisibility();
+}
+
+function persistAnnotations() {
+  if (!S.activeHistoryId) return;
+  const item = S.history.find(h => h.id === S.activeHistoryId);
+  if (!item) return;
+  item.annotations = JSON.parse(JSON.stringify(S.annotations || []));
+  renderHistory();
+  opfsSave(item).catch(() => {});
+}
+
+function renderAnnotList() {
+  const list = $('annotList');
+  const count = $('annotCount');
+  if (!list) return;
+  const n = (S.annotations || []).length;
+  count.textContent = n ? `${n}` : '';
+  if (n === 0) {
+    list.innerHTML = '<div class="hint" style="margin-top:6px">No annotations yet.</div>';
+    return;
+  }
+  list.innerHTML = (S.annotations || []).map(a => {
+    const icon = a.type === 'box' ? '▭' : a.type === 'arrow' ? '↗' : '🅰';
+    const desc = a.type === 'text' ? `"${escapeHtml(a.text || '')}"` : a.type;
+    return `<div class="annot-item" data-id="${a.id}">
+      <span class="annot-icon">${icon}</span>
+      <span class="annot-desc">${desc}</span>
+      <span class="annot-ts">${fmtTs(a.startTime)} → ${fmtTs(a.endTime)}</span>
+      <button class="annot-del" data-id="${a.id}" title="Delete">✕</button>
+    </div>`;
+  }).join('');
 }
 
 // ---------- Subtitle exports ----------
@@ -2463,6 +3471,17 @@ $('mirrorToggle').addEventListener('change', e => {
   showWebcamCssPreview();
   saveOverlay();
 });
+$('lookChips').addEventListener('click', e => {
+  if (!e.target.dataset.look) return;
+  $('lookChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  e.target.classList.add('on');
+  S.look = e.target.dataset.look;
+  saveLook();
+});
+$('followCursorToggle').addEventListener('change', e => {
+  S.followCursor = e.target.checked;
+  saveLook();
+});
 $('langSelect').addEventListener('change', e => { S.settings.whisperLang = e.target.value; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
 $('translateToggle').addEventListener('change', e => { S.settings.whisperTranslate = e.target.checked; saveSettings(); invalidatePreTranscribe(); if (S.recordedBlob && !S.transcript) startPreTranscribe(); });
 
@@ -2517,6 +3536,135 @@ $('captionsToggle').addEventListener('change', () => {
     updateCaption();
   }
 });
+
+$('btnInsights').addEventListener('click', generateInsights);
+$('btnExportBaked').addEventListener('click', exportWithOverlays);
+
+// Annotation tool chips
+$('annotToolChips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip || !chip.dataset.tool) return;
+  startAnnotDraw(chip.dataset.tool);
+});
+
+// Annotation list delete
+$('annotList').addEventListener('click', e => {
+  const btn = e.target.closest('.annot-del');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  S.annotations = (S.annotations || []).filter(a => a.id !== id);
+  renderAnnotations();
+  renderAnnotList();
+  persistAnnotations();
+  updateExportButtonVisibility();
+});
+
+// Drawing on the SVG overlay
+(function attachAnnotDrawing() {
+  const svg = $('annotOverlay');
+  const W = () => recordedVideo.videoWidth  || 1;
+  const H = () => recordedVideo.videoHeight || 1;
+
+  svg.addEventListener('pointerdown', e => {
+    if (!annotDrawTool) return;
+    e.preventDefault();
+    const { x, y } = pointerToLocal(e);
+
+    // Text — single-click flow with a prompt
+    if (annotDrawTool === 'text') {
+      const txt = window.prompt('Annotation text:');
+      if (txt && txt.trim()) {
+        addAnnotation({
+          type: 'text',
+          startTime: recordedVideo.currentTime,
+          endTime:   recordedVideo.currentTime + ANNOT_DURATION_SEC,
+          x: x / W(), y: y / H(), w: 0, h: 0,
+          text: txt.trim().slice(0, 200),
+        });
+      }
+      startAnnotDraw(null);
+      return;
+    }
+
+    // Box / Arrow — drag flow with a dashed preview
+    annotDrawing = { x0: x, y0: y, type: annotDrawTool };
+    const preview = annotDrawing.type === 'box'
+      ? svgEl('rect', {
+          x, y, width: 0, height: 0,
+          fill: 'none', stroke: '#d8482a',
+          'stroke-width': Math.max(4, Math.floor(Math.min(W(), H()) * 0.005)),
+          'stroke-dasharray': '8,5', 'pointer-events': 'none',
+        })
+      : svgEl('line', {
+          x1: x, y1: y, x2: x, y2: y,
+          stroke: '#d8482a',
+          'stroke-width': Math.max(4, Math.floor(Math.min(W(), H()) * 0.005)),
+          'stroke-dasharray': '8,5',
+          'stroke-linecap': 'round',
+          'pointer-events': 'none',
+        });
+    preview.id = '__annPreview';
+    svg.appendChild(preview);
+    try { svg.setPointerCapture(e.pointerId); } catch(_) {}
+  });
+
+  svg.addEventListener('pointermove', e => {
+    if (!annotDrawing) return;
+    const { x, y } = pointerToLocal(e);
+    const preview = svg.querySelector('#__annPreview');
+    if (!preview) return;
+    if (annotDrawing.type === 'box') {
+      preview.setAttribute('x',      Math.min(annotDrawing.x0, x));
+      preview.setAttribute('y',      Math.min(annotDrawing.y0, y));
+      preview.setAttribute('width',  Math.abs(x - annotDrawing.x0));
+      preview.setAttribute('height', Math.abs(y - annotDrawing.y0));
+    } else {
+      preview.setAttribute('x2', x);
+      preview.setAttribute('y2', y);
+    }
+  });
+
+  svg.addEventListener('pointerup', e => {
+    if (!annotDrawing) return;
+    const { x, y } = pointerToLocal(e);
+    const dx = x - annotDrawing.x0, dy = y - annotDrawing.y0;
+    if (Math.hypot(dx, dy) > 12) {
+      if (annotDrawing.type === 'box') {
+        addAnnotation({
+          type: 'box',
+          startTime: recordedVideo.currentTime,
+          endTime:   recordedVideo.currentTime + ANNOT_DURATION_SEC,
+          x: Math.min(annotDrawing.x0, x) / W(),
+          y: Math.min(annotDrawing.y0, y) / H(),
+          w: Math.abs(dx) / W(),
+          h: Math.abs(dy) / H(),
+        });
+      } else {
+        addAnnotation({
+          type: 'arrow',
+          startTime: recordedVideo.currentTime,
+          endTime:   recordedVideo.currentTime + ANNOT_DURATION_SEC,
+          x: annotDrawing.x0 / W(),
+          y: annotDrawing.y0 / H(),
+          w: dx / W(),
+          h: dy / H(),
+        });
+      }
+    }
+    const preview = svg.querySelector('#__annPreview');
+    if (preview) preview.remove();
+    annotDrawing = null;
+    startAnnotDraw(null);
+    try { svg.releasePointerCapture(e.pointerId); } catch(_) {}
+  });
+})();
+
+// Keep the SVG overlay aligned to the recordedVideo's bounding rect and
+// refreshed on every time tick (so annotations appear/disappear at their boundaries).
+recordedVideo.addEventListener('loadedmetadata', () => { syncAnnotOverlay(); renderAnnotations(); });
+recordedVideo.addEventListener('timeupdate',     renderAnnotations);
+recordedVideo.addEventListener('seeking',        renderAnnotations);
+window.addEventListener('resize', syncAnnotOverlay);
 
 $('btnExportSrt').addEventListener('click', () => {
   if (S.transcript) downloadBlob(new Blob([toSrt()], { type: 'text/plain' }), filenameBase() + '.srt');
@@ -2598,11 +3746,15 @@ document.addEventListener('keydown', e => {
 
 // Init
 loadOverlay();
+loadLook();
 loadSettings();
 // Reflect loaded overlay state into the chip UI
 document.querySelectorAll('#sizeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.size === S.overlay.size));
 document.querySelectorAll('#shapeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.shape === S.overlay.shape));
 $('mirrorToggle').checked = !!S.overlay.mirror;
+// Reflect loaded Look state
+document.querySelectorAll('#lookChips .chip').forEach(c => c.classList.toggle('on', c.dataset.look === S.look));
+$('followCursorToggle').checked = !!S.followCursor;
 // Reflect loaded settings into the form controls
 $('langSelect').value = S.settings.whisperLang;
 $('translateToggle').checked = !!S.settings.whisperTranslate;
