@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="author" content="Chirag Patnaik">
 <meta name="description" content="Bolo — record your screen, speak your mind. Nothing leaves your device.">
+<meta name="version" content="v1.0.0">
 <title>Bolo — Browser-Native Screen Recorder</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23e53935'/%3E%3Ccircle cx='16' cy='16' r='6' fill='white'/%3E%3C/svg%3E">
 <style>
@@ -69,14 +70,69 @@
     font-weight: 400;
     margin-left: 2px;
   }
-  .status-pill {
+  .mode-chips {
     margin-left: auto;
+    display: inline-flex;
+    gap: 4px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+  }
+  .mode-chips .chip {
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-mute);
+    font-size: 11px;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .mode-chips .chip.on {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .status-pill {
     font-size: 11px;
     color: var(--text-dim);
     padding: 5px 12px;
     border-radius: 999px;
     background: var(--bg-3);
     border: 1px solid var(--border);
+  }
+
+  /* Quick mode hides the Studio-only surfaces. The existing show/hide logic
+     inside JS still applies in Studio mode; these rules just gate everything
+     off when the user wants a minimal recorder. */
+  body.mode-quick #panelLook,
+  body.mode-quick #panelInsights,
+  body.mode-quick #panelAnnotations,
+  body.mode-quick #exportWrap,
+  body.mode-quick #annotOverlay { display: none !important; }
+
+  /* Live Look preview on the stage — CSS-only mirror of the canvas composition,
+     so the user can see what Studio / Spotlight / Color / Custom will look like
+     before pressing Record. The real composition still happens in the canvas
+     during recording; this is just visual feedback. */
+  .stage[data-look="studio"]    { background: linear-gradient(135deg, #1a2438, #0e1824); }
+  .stage[data-look="spotlight"] { background: radial-gradient(circle at 50% 30%, #2a3450, #060c14 80%); }
+  .stage[data-look="color"]     { background: var(--look-color, #0a1420); }
+  .stage[data-look="custom"]    { background: var(--look-image, #0a1420) center/cover no-repeat; }
+  .stage[data-look="studio"]    #previewVideo,
+  .stage[data-look="studio"]    #recordedVideo,
+  .stage[data-look="color"]     #previewVideo,
+  .stage[data-look="color"]     #recordedVideo,
+  .stage[data-look="custom"]    #previewVideo,
+  .stage[data-look="custom"]    #recordedVideo {
+    max-width: 92%; max-height: 92%;
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  }
+  .stage[data-look="spotlight"] #previewVideo,
+  .stage[data-look="spotlight"] #recordedVideo {
+    max-width: 84%; max-height: 84%;
+    border-radius: 20px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
   }
   .status-pill.rec { color: var(--accent); border-color: var(--accent); }
   .status-pill.ok { color: var(--ok); }
@@ -866,6 +922,17 @@
   .webcam-preview.circle { border-radius: 50%; }
   .webcam-preview.rounded { border-radius: 12px; }
 
+  /* Sidebar stage labels — lightweight grouping for the dense Studio surface */
+  .stage-label {
+    font-size: 9px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin: 14px 4px 4px;
+    font-weight: 700;
+  }
+  .stage-label:first-child { margin-top: 0; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -875,6 +942,10 @@
     <div class="brand-dot"></div>
     <span>Bolo</span>
     <span class="brand-sub">Record your screen. Speak your mind.</span>
+  </div>
+  <div class="mode-chips" id="modeChips" role="tablist" aria-label="App mode">
+    <span class="chip on" data-mode="quick" role="tab" title="Just record, transcribe, download.">Quick</span>
+    <span class="chip" data-mode="studio" role="tab" title="Add Looks, follow-cursor, AI insights, annotations, burn-in export.">Studio</span>
   </div>
   <div class="status-pill" id="statusPill">Idle</div>
   <button class="help-btn" id="helpBtn" title="Help">?</button>
@@ -901,6 +972,7 @@
   </div>
 
   <aside class="sidebar">
+    <div class="stage-label">Setup</div>
     <!-- Sources panel -->
     <div class="panel" id="panelSources">
       <h3 class="collapsible">Sources <span class="caret">▾</span></h3>
@@ -1012,6 +1084,7 @@
       </div>
     </div>
 
+    <div class="stage-label hidden" id="labelDone">Done</div>
     <!-- Actions (post-recording only) -->
     <div class="panel hidden" id="panelDone">
       <h3>Recording ready</h3>
@@ -1087,6 +1160,7 @@
       <div class="warning" id="warningBox"></div>
     </div>
 
+    <div class="stage-label hidden" id="labelHistory">History</div>
     <!-- Recent recordings (session history) -->
     <div class="panel hidden" id="panelHistory">
       <h3>Recent recordings <span class="count" id="histCount"></span></h3>
@@ -1151,6 +1225,7 @@
     <p>Your recording never leaves this page. There is no backend. Close the tab and the recording is gone unless you downloaded it.</p>
 
     <div class="btn-row">
+      <span style="margin-right:auto; font-size:11px; color:var(--text-mute)">Bolo v1.0.0 · single HTML file</span>
       <button class="btn btn-primary" id="helpClose">Got it</button>
     </div>
   </div>
@@ -1300,6 +1375,7 @@ const S = {
   combinedStream: null,
   canvasStream: null,
   compositor: null, // { canvas, ctx, rafId }
+  mode: 'quick',         // 'quick' | 'studio' — gates the power-user surface
   overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true },
   look: 'none',          // 'none' | 'studio' | 'spotlight' | 'color' | 'custom'
   lookColor: '#0a1420',  // active solid color for look === 'color'
@@ -1491,6 +1567,41 @@ function loadExport() {
       S.exportAspect = saved.exportAspect;
     }
   } catch(e) {}
+}
+// Persist Quick / Studio mode choice
+const LS_MODE = 'bolo.mode.v1';
+function saveMode() {
+  try { localStorage.setItem(LS_MODE, S.mode); } catch(e) {}
+}
+function loadMode() {
+  try {
+    const raw = localStorage.getItem(LS_MODE);
+    if (raw === 'quick' || raw === 'studio') S.mode = raw;
+  } catch(e) {}
+}
+function applyMode() {
+  document.body.classList.toggle('mode-quick',  S.mode === 'quick');
+  document.body.classList.toggle('mode-studio', S.mode === 'studio');
+  document.querySelectorAll('#modeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.mode === S.mode));
+  applyStageLook();
+}
+
+// Mirror the active Look onto the stage via CSS so the user sees a preview of
+// what Studio / Spotlight / Color / Custom will produce, BEFORE recording.
+function applyStageLook() {
+  if (!stage) return;
+  if (S.mode === 'quick' || S.look === 'none') {
+    stage.removeAttribute('data-look');
+    stage.style.removeProperty('--look-color');
+    stage.style.removeProperty('--look-image');
+    return;
+  }
+  stage.dataset.look = S.look;
+  if (S.look === 'color') {
+    stage.style.setProperty('--look-color', S.lookColor || '#0a1420');
+  } else if (S.look === 'custom' && S.lookImageUrl) {
+    stage.style.setProperty('--look-image', `url(${S.lookImageUrl})`);
+  }
 }
 // Persist app settings (v2 — quality knobs removed; only language + translate)
 const LS_SETTINGS = 'bolo.settings.v2';
@@ -2278,6 +2389,7 @@ function onRecorderStopped() {
   recordedVideo.src = URL.createObjectURL(S.recordedBlob);
   recordedVideo.classList.add('on');
   panelDone.classList.remove('hidden');
+  $('labelDone').classList.remove('hidden');
   // Reveal the Annotations panel and refresh its empty-state hint.
   $('panelAnnotations').classList.remove('hidden');
   S.annotations = [];
@@ -2310,6 +2422,7 @@ function resetToIdle() {
   if (recordedVideo.src) { URL.revokeObjectURL(recordedVideo.src); recordedVideo.src = ''; }
   recordedVideo.classList.remove('on');
   panelDone.classList.add('hidden');
+  $('labelDone').classList.add('hidden');
   panelTranscript.classList.add('hidden');
   $('panelInsights').classList.add('hidden');
   $('insightsBody').style.display = 'none';
@@ -2358,20 +2471,34 @@ function pushHistory(blob, mime) {
 }
 function renderHistory() {
   const panel = $('panelHistory');
-  if (S.history.length === 0) { panel.classList.add('hidden'); return; }
+  const label = $('labelHistory');
+  if (S.history.length === 0) {
+    panel.classList.add('hidden');
+    if (label) label.classList.add('hidden');
+    return;
+  }
   panel.classList.remove('hidden');
+  if (label) label.classList.remove('hidden');
   $('histCount').textContent = `${S.history.length} of ${HISTORY_MAX}`;
-  $('historyList').innerHTML = S.history.map(h => `
+  $('historyList').innerHTML = S.history.map(h => {
+    const annN = h.annotations ? h.annotations.length : 0;
+    const badges = [
+      h.transcript ? '· captions' : '',
+      h.insights ? '· ✨ insights' : '',
+      annN ? `· ✎ ${annN} annot` : '',
+    ].filter(Boolean).join(' ');
+    return `
     <div class="hist-item ${h.id === S.activeHistoryId ? 'active' : ''}" data-id="${h.id}">
       <div class="hist-info">
         <div class="hist-name">${escapeHtml(h.name)}</div>
-        <div class="hist-meta">${formatBytes(h.sizeBytes)} · ${new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${h.transcript ? ' · captions' : ''}</div>
+        <div class="hist-meta">${formatBytes(h.sizeBytes)} · ${new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ${badges}</div>
       </div>
       <button class="hist-btn" data-act="load" data-id="${h.id}" title="Open">▶</button>
       <button class="hist-btn" data-act="dl" data-id="${h.id}" title="Download">↓</button>
       <button class="hist-btn" data-act="del" data-id="${h.id}" title="Delete">✕</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 function loadHistoryItem(id) {
   const item = S.history.find(h => h.id === id);
@@ -2385,6 +2512,7 @@ function loadHistoryItem(id) {
   previewVideo.classList.remove('on');
   webcamPreview.classList.remove('on');
   panelDone.classList.remove('hidden');
+  $('labelDone').classList.remove('hidden');
   $('panelAnnotations').classList.remove('hidden');
   setSetupPanelsCollapsed(true);
   S.transcript   = item.transcript   ? JSON.parse(JSON.stringify(item.transcript))   : null;
@@ -2433,6 +2561,7 @@ function deleteHistoryItem(id) {
     $('panelAnnotations').classList.add('hidden');
     $('annotOverlay').classList.remove('on');
     panelDone.classList.add('hidden');
+    $('labelDone').classList.add('hidden');
     panelTranscript.classList.add('hidden');
     $('panelInsights').classList.add('hidden');
     $('insightsBody').style.display = 'none';
@@ -3668,6 +3797,7 @@ function reflectLookChips() {
   document.querySelectorAll('#lookChips .chip').forEach(c => c.classList.toggle('on', c.dataset.look === S.look));
   const dot = $('lookColorDot');
   if (dot) dot.style.background = S.lookColor || '#0a1420';
+  applyStageLook();
 }
 
 $('lookChips').addEventListener('click', e => {
@@ -3788,6 +3918,15 @@ $('exportAspectChips').addEventListener('click', e => {
   chip.classList.add('on');
   S.exportAspect = chip.dataset.aspect;
   saveExport();
+});
+
+// Quick / Studio mode toggle
+$('modeChips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip || !chip.dataset.mode) return;
+  S.mode = chip.dataset.mode;
+  applyMode();
+  saveMode();
 });
 
 // Annotation tool chips
@@ -4010,7 +4149,9 @@ document.addEventListener('keydown', e => {
 loadOverlay();
 loadLook();
 loadExport();
+loadMode();
 loadSettings();
+applyMode();
 // Reflect loaded overlay state into the chip UI
 document.querySelectorAll('#sizeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.size === S.overlay.size));
 document.querySelectorAll('#shapeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.shape === S.overlay.shape));
