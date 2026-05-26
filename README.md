@@ -83,6 +83,13 @@ Or just open `index.html` directly in Chrome — works from `file://` too.
 
 [**bolo.naklitechie.com**](https://bolo.naklitechie.com/)
 
+## User guide
+
+A walkthrough with screenshots of every feature — Quick / Studio modes, Looks, follow-cursor zoom, captions, AI insights, annotations, blur, burn-in export with aspect-ratio presets, gallery, keyboard shortcuts, privacy.
+
+- **Local**: [`docs/guide.html`](docs/guide.html)
+- **Hosted**: [bolo.naklitechie.com/docs/guide.html](https://bolo.naklitechie.com/docs/guide.html)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

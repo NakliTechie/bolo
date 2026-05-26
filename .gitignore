@@ -4,6 +4,8 @@
 !LICENSE
 !.gitignore
 !_headers
+!docs
+!docs/**
 
 # wrangler files
 .wrangler

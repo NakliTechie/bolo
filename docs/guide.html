@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Chirag Patnaik">
+<meta name="description" content="Bolo user guide — every feature, end to end, with screenshots.">
+<title>Bolo — User Guide</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23d8482a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='white'/%3E%3C/svg%3E">
+<style>
+  /* Rangrez · scandinavia-10 · POLARNATT — match Bolo's app palette */
+  :root {
+    --bg: #08101a;
+    --bg-2: #0e1824;
+    --bg-3: #141e2c;
+    --border: #1f2c40;
+    --border-2: #2c3a52;
+    --text: #e8eef4;
+    --text-dim: #98a8b8;
+    --text-mute: #5a6a78;
+    --accent: #d8482a;
+    --accent-hover: #e85a3a;
+    --accent-dim: rgba(216, 72, 42, 0.15);
+    --act: #3a8a9a;
+    --ok: #5a9a4a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { min-height: 100vh; }
+
+  /* Sticky page header echoing Bolo's main app header */
+  header.site {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 28px;
+    background: rgba(14, 24, 36, 0.92);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+  .brand-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .brand-sub { font-size: 11px; color: var(--text-dim); font-weight: 400; margin-left: 2px; }
+  header.site nav { margin-left: auto; display: flex; gap: 18px; font-size: 12px; }
+  header.site nav a { color: var(--text-dim); text-decoration: none; }
+  header.site nav a:hover { color: var(--accent); }
+
+  main {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 48px 28px 96px;
+  }
+
+  /* Hero */
+  .hero { margin-bottom: 64px; }
+  .hero h1 {
+    font-size: 40px; font-weight: 800; line-height: 1.15;
+    letter-spacing: -0.015em;
+    margin-bottom: 12px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero .tagline {
+    font-size: 18px; color: var(--text-dim);
+    margin-bottom: 28px;
+  }
+  .hero .meta {
+    display: inline-flex; align-items: center; gap: 12px;
+    font-size: 11px; color: var(--text-mute);
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .hero .meta a { color: var(--accent); text-decoration: none; }
+  .hero .meta a:hover { color: var(--accent-hover); }
+
+  /* Table of contents */
+  .toc {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 64px;
+  }
+  .toc h2 {
+    font-size: 11px; color: var(--text-mute);
+    text-transform: uppercase; letter-spacing: 0.12em;
+    margin-bottom: 14px;
+    font-weight: 700;
+  }
+  .toc ol {
+    columns: 2; column-gap: 28px;
+    list-style: decimal inside;
+    color: var(--text-dim);
+  }
+  .toc li { margin-bottom: 6px; font-size: 13px; }
+  .toc a { color: var(--text); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+
+  /* Sections */
+  section { margin-bottom: 80px; scroll-margin-top: 72px; }
+  section h2 {
+    font-size: 26px; font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  section h2 .step {
+    display: inline-block;
+    width: 28px; height: 28px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 50%;
+    text-align: center; line-height: 28px;
+    font-size: 13px; font-weight: 700;
+    margin-right: 12px;
+    vertical-align: 2px;
+  }
+  section h3 {
+    font-size: 15px; font-weight: 700;
+    margin: 24px 0 8px;
+    color: var(--text);
+  }
+  section p {
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+  section p .ink { color: var(--text); font-weight: 600; }
+  section ul, section ol {
+    margin: 0 0 14px 22px;
+    color: var(--text-dim);
+  }
+  section li { margin-bottom: 6px; }
+  section code, section kbd {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+  section kbd { font-weight: 600; }
+
+  /* Screenshot frames */
+  figure {
+    margin: 20px 0 24px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  figure figcaption {
+    font-size: 12px;
+    color: var(--text-mute);
+    text-align: center;
+    margin-top: 10px;
+    line-height: 1.4;
+  }
+
+  /* Callouts */
+  .callout {
+    background: rgba(58, 138, 154, 0.08);
+    border: 1px solid var(--act);
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 20px 0;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .callout strong { color: var(--act); }
+  .callout.warn { background: rgba(216, 168, 104, 0.08); border-color: #d8a868; }
+  .callout.warn strong { color: #d8a868; }
+  .callout.privacy { background: var(--accent-dim); border-color: var(--accent); }
+  .callout.privacy strong { color: var(--accent); }
+
+  /* Keyboard shortcut table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--text-mute);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+  td { color: var(--text-dim); }
+  td:first-child { color: var(--text); }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 32px 28px 48px;
+    font-size: 12px;
+    color: var(--text-mute);
+    border-top: 1px solid var(--border);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { color: var(--accent-hover); }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="brand">
+    <div class="brand-dot"></div>
+    <span>Bolo</span>
+    <span class="brand-sub">User Guide</span>
+  </div>
+  <nav>
+    <a href="https://bolo.naklitechie.com/">Open Bolo</a>
+    <a href="https://github.com/NakliTechie/bolo">Source</a>
+    <a href="https://naklitechie.github.io/">More projects</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="hero">
+  <h1>Record your screen.<br><span class="accent">Speak your mind.</span></h1>
+  <p class="tagline">Bolo is a single-file browser screen recorder. Captions, summaries, annotations, blur-in-export — all running on your machine. Nothing leaves your device.</p>
+  <p class="meta">Bolo v1.0.0 · <a href="https://bolo.naklitechie.com/">bolo.naklitechie.com</a></p>
+</section>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#first-look">First look</a></li>
+    <li><a href="#quick-studio">Quick vs Studio</a></li>
+    <li><a href="#sources">Pick your sources</a></li>
+    <li><a href="#looks">Looks &amp; follow-cursor</a></li>
+    <li><a href="#record">Record</a></li>
+    <li><a href="#captions">Captions (Whisper)</a></li>
+    <li><a href="#insights">AI insights</a></li>
+    <li><a href="#annotations">Annotations &amp; blur</a></li>
+    <li><a href="#export">Export</a></li>
+    <li><a href="#gallery">Gallery</a></li>
+    <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+    <li><a href="#privacy">Privacy</a></li>
+  </ol>
+</nav>
+
+<section id="first-look">
+  <h2><span class="step">1</span>First look</h2>
+  <p>Open Bolo and you're looking at <span class="ink">the recorder</span>. The big black area on the left is the <span class="ink">stage</span> — your live preview during recording and the playback after. Everything else lives in the right sidebar.</p>
+  <figure>
+    <img src="screenshots/01-empty.jpg" alt="Bolo's idle state — empty stage, Sources and Captions panels in the sidebar.">
+    <figcaption>The idle state, fresh load. Pick your sources on the right to start.</figcaption>
+  </figure>
+  <p>The header chip pair at the top right is the <a href="#quick-studio">mode toggle</a>. Bolo opens in <span class="ink">Quick mode</span> by default — the simplest possible recorder. Click <span class="ink">Studio</span> to unlock Looks, AI insights, annotations, and burn-in export.</p>
+</section>
+
+<section id="quick-studio">
+  <h2><span class="step">2</span>Quick vs Studio</h2>
+  <p>Two modes, one toggle:</p>
+  <ul>
+    <li><span class="ink">Quick</span> — Sources, Captions, Record, Download. A clean screen recorder. Good for first-timers and one-shot captures.</li>
+    <li><span class="ink">Studio</span> — adds <span class="ink">Looks</span> (background framing), <span class="ink">Follow-cursor zoom</span>, <span class="ink">AI insights</span>, <span class="ink">post-record annotations</span>, <span class="ink">burn-in export</span>, and <span class="ink">aspect-ratio presets</span>. The full power-user surface.</li>
+  </ul>
+  <figure>
+    <img src="screenshots/02-studio-mode.jpg" alt="Studio mode active — the sidebar grows a Look panel below Sources.">
+    <figcaption>Studio mode active. The sidebar grows new panels (Look here; Annotations &amp; AI Insights appear after recording).</figcaption>
+  </figure>
+  <p>Your choice persists across sessions per device.</p>
+</section>
+
+<section id="sources">
+  <h2><span class="step">3</span>Pick your sources</h2>
+  <p>The <span class="ink">Sources</span> panel has three toggles:</p>
+  <ul>
+    <li><span class="ink">Screen</span> — picks a tab, window, or whole screen via the browser's native picker.</li>
+    <li><span class="ink">Webcam</span> — your camera, optionally drag-positioned and shaped (square / rounded / circle).</li>
+    <li><span class="ink">Mic</span> — your microphone, with a live level meter.</li>
+  </ul>
+  <p>You can mix any combination. Screen + webcam composites the webcam as a draggable picture-in-picture overlay during recording.</p>
+  <div class="callout">
+    <strong>Tip:</strong> if Bolo detects you accidentally picked its own tab as the screen source (which would create a feedback loop), it stops the share and warns you.
+  </div>
+</section>
+
+<section id="looks">
+  <h2><span class="step">4</span>Looks &amp; follow-cursor</h2>
+  <p><span class="ink">Studio mode only.</span> The <span class="ink">Look</span> panel applies framing to your recording — gradient background, padding, rounded corners, drop shadow. Five presets:</p>
+  <ul>
+    <li><span class="ink">None</span> — raw screen capture.</li>
+    <li><span class="ink">Studio</span> — dark navy gradient, subtle padding, soft shadow.</li>
+    <li><span class="ink">Spotlight</span> — dramatic dark vignette, larger padding, deeper shadow.</li>
+    <li><span class="ink">Color</span> — opens a colour picker for any solid hex.</li>
+    <li><span class="ink">Custom…</span> — opens a file picker for any background image (cover-fit).</li>
+  </ul>
+  <figure>
+    <img src="screenshots/03-look-spotlight.jpg" alt="Spotlight Look applied to the stage — radial vignette around the empty preview.">
+    <figcaption>Spotlight Look applied. The stage mirrors the framing live so you see what you'll get before recording.</figcaption>
+  </figure>
+  <p><span class="ink">Follow cursor (auto-zoom)</span> — toggle below the Look chips. When on, the canvas gently zooms 1.4× toward whatever's moving on screen. Bolo infers cursor position from frame-to-frame pixel deltas (the browser can't read it directly the way native screen recorders can).</p>
+  <div class="callout warn">
+    <strong>Note:</strong> the live stage preview shows the Look's background and rounded corners. The actual composition (gradient + padding + cursor zoom) is baked into the WebM during recording.
+  </div>
+</section>
+
+<section id="record">
+  <h2><span class="step">5</span>Record</h2>
+  <p>Hit the big red <span class="ink">REC</span> button at the bottom right (or press <kbd>⌘⇧B</kbd>). Bolo counts down <span class="ink">3 · 2 · 1</span>, then starts.</p>
+  <ul>
+    <li><span class="ink">Recording another tab?</span> Bolo opens a tiny always-on-top Document Picture-in-Picture window with timer + pause + stop, so you can control recording from anywhere.</li>
+    <li><span class="ink">No Document PiP support?</span> Bolo falls back to a draggable floating control bar in the page.</li>
+    <li><span class="ink">Pause / resume</span> any time with <kbd>⌘⇧.</kbd>.</li>
+    <li><span class="ink">Cancel</span> and discard with <kbd>Esc</kbd>.</li>
+  </ul>
+  <p>Stop with the FAB or <kbd>⌘⇧B</kbd> again. You land back on the stage with the playback ready.</p>
+  <figure>
+    <img src="screenshots/05-post-record.jpg" alt="Post-recording state — playback area, Recording Ready panel with action buttons.">
+    <figcaption>Right after stopping. The setup panels collapse; the playback and the Recording Ready actions take over.</figcaption>
+  </figure>
+</section>
+
+<section id="captions">
+  <h2><span class="step">6</span>Captions (Whisper)</h2>
+  <p>Click <span class="ink">✨ Generate Captions</span> in the Recording Ready panel. Bolo runs <span class="ink">Whisper Small</span> (Xenova/whisper-small via Transformers.js) locally in a Web Worker.</p>
+  <ul>
+    <li><span class="ink">First run downloads ~250 MB</span> of model weights, then cached forever in your browser's Cache Storage.</li>
+    <li><span class="ink">15 languages</span> with auto-detect. Pick one in the <span class="ink">Captions</span> panel pre-record, or leave it on Auto.</li>
+    <li><span class="ink">Translate to English</span> toggle for non-English speakers.</li>
+    <li>Bolo pre-transcribes silently the moment you stop recording, so by the time you click the button it's usually instant (<span class="ink">⚡ Captions ready</span>).</li>
+  </ul>
+  <p>Each transcript segment is <span class="ink">editable in place</span> — click any line to fix typos. Timestamps are clickable to seek the playback.</p>
+</section>
+
+<section id="insights">
+  <h2><span class="step">7</span>AI insights</h2>
+  <p><span class="ink">Studio mode only.</span> Once you have a transcript, click <span class="ink">✨ Generate title, summary, chapters</span> in the AI Insights panel. Bolo runs <span class="ink">Qwen 2.5 0.5B Instruct</span> on WebGPU (via Transformers.js v4) and produces:</p>
+  <ul>
+    <li>A short <span class="ink">title</span> (4–10 words).</li>
+    <li>A <span class="ink">one-paragraph summary</span>.</li>
+    <li><span class="ink">Clickable chapter markers</span> grounded in the transcript timestamps.</li>
+  </ul>
+  <figure>
+    <img src="screenshots/06-transcript-insights.jpg" alt="Transcript and AI insights panels populated — title, summary, and four clickable chapters.">
+    <figcaption>Transcript above, AI insights below. Click any chapter to seek the playback to that moment.</figcaption>
+  </figure>
+  <p>First run downloads ~350 MB of model weights, cached forever. The insights are stored on the recording's history entry so they survive reloads.</p>
+</section>
+
+<section id="annotations">
+  <h2><span class="step">8</span>Annotations &amp; blur</h2>
+  <p><span class="ink">Studio mode only.</span> The <span class="ink">Annotations</span> panel adds four draw tools you can use directly on the playback:</p>
+  <ul>
+    <li><span class="ink">↗ Arrow</span> — click + drag from tail to head.</li>
+    <li><span class="ink">▭ Box</span> — click + drag to outline a region.</li>
+    <li><span class="ink">🅰 Text</span> — click on the playback, type a short label.</li>
+    <li><span class="ink">🌫 Blur</span> — click + drag a region. Pixels under the rect get redacted in the export (and live-blurred during playback via <code>backdrop-filter</code>).</li>
+  </ul>
+  <p>Each annotation is visible for <span class="ink">3 seconds</span> from the moment you draw it. Pause the playback to set the exact starting frame.</p>
+  <figure>
+    <img src="screenshots/07-annotations-blur.jpg" alt="Playback with an arrow, a box, a text label, and a blur rectangle, with the annotations list in the sidebar.">
+    <figcaption>All four annotation tools on the same frame, listed in the sidebar.</figcaption>
+  </figure>
+  <p>Annotations persist on the recording's history entry. They never leak between recordings.</p>
+  <div class="callout">
+    <strong>Use the blur tool for:</strong> credit cards, passwords, customer PII in a dashboard, API keys in a terminal — anything that shouldn't ship in a shareable video.
+  </div>
+</section>
+
+<section id="export">
+  <h2><span class="step">9</span>Export</h2>
+  <p>Bolo has two export paths:</p>
+  <h3>↓ Download (instant)</h3>
+  <p>The original captured WebM/MP4 plus a sidecar <code>.srt</code> if you have captions. VLC, IINA, mpv all auto-load the SRT. Native, no re-encoding.</p>
+  <h3>🎬 Export with overlays burned in</h3>
+  <p><span class="ink">Studio mode only.</span> Re-encodes the recording with captions and/or annotations baked into the pixels. Useful when the destination doesn't understand sidecar SRT — YouTube, Twitter, embedded players, social media.</p>
+  <figure>
+    <img src="screenshots/08-burn-in-export.jpg" alt="Burn-in export button with aspect-ratio chips: Native / 1:1 / 9:16 / 16:9.">
+    <figcaption>The burn-in export with aspect-ratio presets. Pick the right shape for the destination.</figcaption>
+  </figure>
+  <ul>
+    <li><span class="ink">Native</span> keeps the source resolution.</li>
+    <li><span class="ink">1:1</span> exports 1080 × 1080 (Instagram feed, square cards).</li>
+    <li><span class="ink">9:16</span> exports 1080 × 1920 (Instagram Reels, TikTok, vertical social).</li>
+    <li><span class="ink">16:9</span> exports 1920 × 1080 (YouTube, embeds, presentations).</li>
+  </ul>
+  <p>Non-native aspects use <span class="ink">cover semantics</span> — the source is center-cropped to fill the target frame. The output filename gains a <code>-1x1</code> / <code>-9x16</code> / <code>-16x9</code> suffix.</p>
+  <div class="callout warn">
+    <strong>Export speed:</strong> burn-in re-encodes via canvas + MediaRecorder driven by the source video's <code>requestVideoFrameCallback</code>. Roughly real-time — a 5-minute recording takes ~5 minutes to bake. The progress bar shows the playhead so you know how far along it is.
+  </div>
+</section>
+
+<section id="gallery">
+  <h2><span class="step">10</span>Gallery</h2>
+  <p>The <span class="ink">Recent recordings</span> panel at the bottom of the sidebar lists everything you've captured this session and prior — Bolo persists recordings into your browser's OPFS (Origin Private File System).</p>
+  <figure>
+    <img src="screenshots/09-gallery.jpg" alt="Recent recordings list with three items, the top one showing captions, insights, and annotation badges.">
+    <figcaption>Each row shows the size, the time, and badges for what's been processed.</figcaption>
+  </figure>
+  <ul>
+    <li><span class="ink">▶</span> opens the recording for playback / re-export.</li>
+    <li><span class="ink">↓</span> downloads it without re-opening.</li>
+    <li><span class="ink">✕</span> deletes it from the gallery.</li>
+  </ul>
+  <p>Badges at a glance:</p>
+  <ul>
+    <li><span class="ink">· captions</span> — has a transcript.</li>
+    <li><span class="ink">· ✨ insights</span> — has AI title / summary / chapters.</li>
+    <li><span class="ink">· ✎ N annot</span> — has N annotations.</li>
+  </ul>
+  <div class="callout">
+    <strong>Capacity:</strong> 500 MB cap with FIFO eviction. The oldest recording is auto-deleted when you exceed the cap. Use <span class="ink">Download</span> to copy anything you want to keep onto your real disk.
+  </div>
+</section>
+
+<section id="shortcuts">
+  <h2><span class="step">11</span>Keyboard shortcuts</h2>
+  <table>
+    <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>⌘⇧B</kbd> / <kbd>Ctrl⇧B</kbd></td><td>Start / stop recording</td></tr>
+      <tr><td><kbd>⌘⇧.</kbd> / <kbd>Ctrl⇧.</kbd></td><td>Pause / resume</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Cancel and discard the current recording</td></tr>
+    </tbody>
+  </table>
+  <p><kbd>⌘⇧R</kbd> would conflict with the browser's hard-reload shortcut, so Bolo uses <kbd>B</kbd> for "Bolo".</p>
+</section>
+
+<section id="privacy">
+  <h2><span class="step">12</span>Privacy</h2>
+  <p class="callout privacy">
+    <strong>Everything stays on your device.</strong> There is no backend. There never will be. Bolo's only network calls are the one-time downloads of Whisper (~250 MB) and Qwen (~350 MB) from the Hugging Face CDN — and those land in your browser's Cache Storage, accessible only to this site. Close the tab and your recordings stay in your private OPFS, visible only to you, only on this device. Use Download to copy anything to disk.
+  </p>
+  <p>No telemetry. No analytics. No accounts. No share links. No cloud upload. The transcripts, the AI insights, the annotations, the blur regions — all generated locally and stored locally.</p>
+</section>
+
+</main>
+
+<footer>
+  <p>
+    Bolo is part of the <a href="https://naklitechie.github.io/">NakliTechie</a> series of single-file, private-by-default browser tools by Chirag Patnaik.<br>
+    MIT licensed — <a href="https://github.com/NakliTechie/bolo">source on GitHub</a>.
+  </p>
+</footer>
+
+</body>
+</html>
