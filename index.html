@@ -365,6 +365,15 @@
     border-color: var(--accent);
     color: var(--accent);
   }
+  .color-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 1px solid var(--border-2);
+    margin-right: 5px;
+    vertical-align: middle;
+    background: #0a1420;
+  }
 
   .level-meter {
     height: 6px;
@@ -444,6 +453,15 @@
     letter-spacing: 0.06em;
     margin-right: 4px;
   }
+
+  /* Aspect chip row for the burn-in export */
+  .export-aspect-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .export-aspect-row .chip { font-size: 10px; padding: 4px 8px; }
 
   /* Floating control bar during recording */
   .float-bar {
@@ -920,7 +938,11 @@
             <span class="chip on" data-look="none">None</span>
             <span class="chip" data-look="studio">Studio</span>
             <span class="chip" data-look="spotlight">Spotlight</span>
+            <span class="chip" data-look="color"><span class="color-dot" id="lookColorDot"></span>Color</span>
+            <span class="chip" data-look="custom">📷 Custom…</span>
           </div>
+          <input type="color" id="lookColorInput" style="position:absolute;left:-9999px;top:-9999px" value="#0a1420">
+          <input type="file" id="lookImageInput" accept="image/*" style="display:none">
         </div>
         <label class="toggle-row" style="margin-top:6px">
           <input type="checkbox" id="followCursorToggle">
@@ -996,7 +1018,16 @@
       <div class="actions" id="actionsDone">
         <button class="btn btn-primary" id="btnTranscribe">✨ Generate Captions</button>
         <button class="btn" id="btnDownload">↓ Download</button>
-        <button class="btn hidden" id="btnExportBaked">🎬 Export with overlays burned in</button>
+        <div class="hidden" id="exportWrap">
+          <div class="export-aspect-row" id="exportAspectChips">
+            <span class="export-label">Aspect</span>
+            <span class="chip on" data-aspect="native">Native</span>
+            <span class="chip" data-aspect="1:1">1:1</span>
+            <span class="chip" data-aspect="9:16">9:16</span>
+            <span class="chip" data-aspect="16:9">16:9</span>
+          </div>
+          <button class="btn" id="btnExportBaked" style="margin-top:6px; width:100%;">🎬 Export with overlays burned in</button>
+        </div>
         <button class="btn btn-ghost btn-danger" id="btnDiscard">Start Over</button>
       </div>
     </div>
@@ -1027,6 +1058,7 @@
             <span class="chip" data-tool="arrow">↗ Arrow</span>
             <span class="chip" data-tool="box">▭ Box</span>
             <span class="chip" data-tool="text">🅰 Text</span>
+            <span class="chip" data-tool="blur">🌫 Blur</span>
           </div>
         </div>
         <div class="hint" style="margin-bottom:8px">Pick a tool, then drag on the playback to draw. Each annotation is visible for 3 seconds from the moment you drew it.</div>
@@ -1163,7 +1195,90 @@ const LOOKS = {
       return g;
     },
   },
+  // Solid-color background — reads the currently-picked colour from S.lookColor.
+  color: {
+    label: 'Color',
+    padding: 0.04,
+    radius: 0.012,
+    shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.025, offsetY: 0.008 },
+    bgGrad: () => S.lookColor || '#0a1420',
+  },
+  // Custom uploaded image background. The composite draw loop special-cases this
+  // entry: instead of fillStyle, it draws S.lookImage at cover dimensions.
+  custom: {
+    label: 'Custom',
+    padding: 0.04,
+    radius: 0.012,
+    shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.025, offsetY: 0.008 },
+    bgGrad: () => '#0a1420',  // fallback if no image loaded yet
+  },
 };
+
+// Cover-fit draw for a background image into a canvas — fills the rect, crops the longer axis.
+function drawCoverImage(ctx, img, W, H) {
+  if (!img || !img.naturalWidth) return;
+  const imgAR = img.naturalWidth / img.naturalHeight;
+  const canvasAR = W / H;
+  let dw, dh, dx, dy;
+  if (imgAR > canvasAR) {
+    dh = H; dw = H * imgAR; dx = (W - dw) / 2; dy = 0;
+  } else {
+    dw = W; dh = W / imgAR; dx = 0; dy = (H - dh) / 2;
+  }
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+// Export aspect-ratio presets. The bake pipeline computes a center-crop on the
+// source (cover semantics — fill the target, crop the longer axis) and re-renders
+// captions / annotations into the target frame.
+const EXPORT_ASPECTS = {
+  'native': { label: 'Native', size: null },
+  '1:1':    { label: '1:1',  size: { W: 1080, H: 1080 } },
+  '9:16':   { label: '9:16', size: { W: 1080, H: 1920 } },
+  '16:9':   { label: '16:9', size: { W: 1920, H: 1080 } },
+};
+
+// Given source dims and a target aspect, return target canvas dims + the source
+// crop rect to draw from (cover semantics — fill the target, crop the longer axis).
+function computeAspectFrame(srcW, srcH, aspect) {
+  const cfg = EXPORT_ASPECTS[aspect] || EXPORT_ASPECTS.native;
+  if (!cfg.size) {
+    return { tgtW: srcW, tgtH: srcH, srcCrop: { sx: 0, sy: 0, sw: srcW, sh: srcH } };
+  }
+  const { W: tgtW, H: tgtH } = cfg.size;
+  const srcAR = srcW / srcH, tgtAR = tgtW / tgtH;
+  let sx, sy, sw, sh;
+  if (tgtAR > srcAR) {
+    // target wider — fit width, crop top/bottom
+    sw = srcW;
+    sh = srcW / tgtAR;
+    sx = 0;
+    sy = (srcH - sh) / 2;
+  } else {
+    // target taller (or square) — fit height, crop sides
+    sh = srcH;
+    sw = srcH * tgtAR;
+    sx = (srcW - sw) / 2;
+    sy = 0;
+  }
+  return { tgtW, tgtH, srcCrop: { sx, sy, sw, sh } };
+}
+
+// Map an annotation's 0..1 source-relative coords into 0..1 target-relative coords
+// for the given crop rect. Identity transform when srcCrop covers the full source.
+function mapAnnotationToTarget(a, srcW, srcH, srcCrop) {
+  if (!srcCrop || (srcCrop.sx === 0 && srcCrop.sy === 0 && srcCrop.sw === srcW && srcCrop.sh === srcH)) {
+    return a;
+  }
+  const srcX = a.x * srcW, srcY = a.y * srcH;
+  const srcPxW = a.w * srcW, srcPxH = a.h * srcH;
+  return Object.assign({}, a, {
+    x: (srcX - srcCrop.sx) / srcCrop.sw,
+    y: (srcY - srcCrop.sy) / srcCrop.sh,
+    w: srcPxW / srcCrop.sw,
+    h: srcPxH / srcCrop.sh,
+  });
+}
 
 function roundedRectPath(ctx, x, y, w, h, r) {
   r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
@@ -1186,8 +1301,12 @@ const S = {
   canvasStream: null,
   compositor: null, // { canvas, ctx, rafId }
   overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true },
-  look: 'none',          // 'none' | 'studio' | 'spotlight' — Cap-style preset bundles
+  look: 'none',          // 'none' | 'studio' | 'spotlight' | 'color' | 'custom'
+  lookColor: '#0a1420',  // active solid color for look === 'color'
+  lookImageUrl: null,    // object URL for custom uploaded image (session-only)
+  lookImage: null,       // Image element loaded from lookImageUrl
   followCursor: false,   // continuous smart-follow zoom via frame-diff motion centroid
+  exportAspect: 'native',// 'native' | '1:1' | '9:16' | '16:9' — burn-in export framing
   pipWindow: null,
   devices: { cams: [], mics: [] },
   // Quality is locked to the best supported. The only knobs the user touches
@@ -1335,11 +1454,17 @@ function loadOverlay() {
     if (raw) Object.assign(S.overlay, JSON.parse(raw));
   } catch(e) {}
 }
-// Persist Look preset + follow-cursor toggle
+// Persist Look preset + follow-cursor toggle + active solid colour.
+// Custom uploaded images are session-only (image bytes don't round-trip cleanly
+// through localStorage; OPFS would work but feels disproportionate for this).
 const LS_LOOK = 'bolo.look.v1';
 function saveLook() {
   try {
-    localStorage.setItem(LS_LOOK, JSON.stringify({ look: S.look, followCursor: S.followCursor }));
+    localStorage.setItem(LS_LOOK, JSON.stringify({
+      look: S.look === 'custom' ? 'none' : S.look,  // 'custom' downgrades — image is gone next load
+      followCursor: S.followCursor,
+      lookColor: S.lookColor,
+    }));
   } catch(e) {}
 }
 function loadLook() {
@@ -1347,8 +1472,24 @@ function loadLook() {
     const raw = localStorage.getItem(LS_LOOK);
     if (!raw) return;
     const saved = JSON.parse(raw);
-    if (typeof saved.look === 'string' && LOOKS[saved.look]) S.look = saved.look;
+    if (typeof saved.look === 'string' && LOOKS[saved.look] && saved.look !== 'custom') S.look = saved.look;
     if (typeof saved.followCursor === 'boolean') S.followCursor = saved.followCursor;
+    if (typeof saved.lookColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(saved.lookColor)) S.lookColor = saved.lookColor;
+  } catch(e) {}
+}
+// Persist export aspect ratio choice
+const LS_EXPORT = 'bolo.export.v1';
+function saveExport() {
+  try { localStorage.setItem(LS_EXPORT, JSON.stringify({ exportAspect: S.exportAspect })); } catch(e) {}
+}
+function loadExport() {
+  try {
+    const raw = localStorage.getItem(LS_EXPORT);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved.exportAspect === 'string' && EXPORT_ASPECTS[saved.exportAspect]) {
+      S.exportAspect = saved.exportAspect;
+    }
   } catch(e) {}
 }
 // Persist app settings (v2 — quality knobs removed; only language + translate)
@@ -1859,8 +2000,13 @@ function buildCompositeStream() {
         // Inner rect (Look padding eats into it). Background paint if Look active.
         let ix = 0, iy = 0, iw = W, ih = H;
         if (lookOn) {
-          ctx.fillStyle = look.bgGrad(ctx, W, H);
-          ctx.fillRect(0, 0, W, H);
+          if (S.look === 'custom' && S.lookImage) {
+            // Cover-fit the uploaded image into the full canvas as the background.
+            drawCoverImage(ctx, S.lookImage, W, H);
+          } else {
+            ctx.fillStyle = look.bgGrad(ctx, W, H);
+            ctx.fillRect(0, 0, W, H);
+          }
           const padX = Math.floor(W * look.padding);
           const padY = Math.floor(H * look.padding);
           ix = padX; iy = padY;
@@ -2169,7 +2315,7 @@ function resetToIdle() {
   $('insightsBody').style.display = 'none';
   $('panelAnnotations').classList.add('hidden');
   $('annotOverlay').classList.remove('on');
-  $('btnExportBaked').classList.add('hidden');
+  $('exportWrap').classList.add('hidden');
   S.transcript = null;
   S.insights = null;
   S.annotations = [];
@@ -2283,7 +2429,7 @@ function deleteHistoryItem(id) {
     S.annotations = [];
     annotDrawTool = null;
     updateAnnotToolChips();
-    $('btnExportBaked').classList.add('hidden');
+    $('exportWrap').classList.add('hidden');
     $('panelAnnotations').classList.add('hidden');
     $('annotOverlay').classList.remove('on');
     panelDone.classList.add('hidden');
@@ -3067,7 +3213,11 @@ function drawCaptionOnCanvas(ctx, text, W, H) {
 // Annotation renderer (stub filled in by the annotations task; this is called from bakeRecording
 // so the function shape needs to exist now). Coords on annotations are relative to the source
 // rect (0..1) so they survive resolution changes.
-function drawAnnotationOnCanvas(ctx, a, W, H) {
+// `srcVid` is the source video element — only used by the blur path, which re-draws a clipped
+// region with Canvas2D blur applied. Pass null for live-render or no-op paths.
+// `srcCrop` is { sx, sy, sw, sh } for the source-to-target mapping when an aspect-ratio export
+// is in play; null means draw the full source. Only used by the blur path.
+function drawAnnotationOnCanvas(ctx, a, W, H, srcVid, srcCrop) {
   if (!a) return;
   const x = a.x * W, y = a.y * H, w = a.w * W, h = a.h * H;
   const accent = '#d8482a';
@@ -3078,7 +3228,27 @@ function drawAnnotationOnCanvas(ctx, a, W, H) {
   ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  if (a.type === 'box') {
+  if (a.type === 'blur' && srcVid) {
+    // Clip to the blur region, then re-draw the source frame with a Canvas2D
+    // blur filter applied. With an aspect-ratio crop in play we draw the same
+    // cropped sub-rect of the source so the blur lines up with the underlying pixels.
+    const blurRadius = Math.max(10, Math.min(W, H) * 0.025);
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.filter = `blur(${blurRadius}px)`;
+    if (srcCrop) {
+      ctx.drawImage(srcVid, srcCrop.sx, srcCrop.sy, srcCrop.sw, srcCrop.sh, 0, 0, W, H);
+    } else {
+      ctx.drawImage(srcVid, 0, 0, W, H);
+    }
+    ctx.filter = 'none';
+  } else if (a.type === 'blur') {
+    // Live-canvas fallback (no source video available): paint an opaque dark rect
+    // so the redaction is at least visible in any non-bake context.
+    ctx.fillStyle = 'rgba(20, 20, 28, 0.96)';
+    ctx.fillRect(x, y, w, h);
+  } else if (a.type === 'box') {
     ctx.strokeRect(x, y, w, h);
   } else if (a.type === 'arrow') {
     // Arrow from (x,y) to (x+w, y+h)
@@ -3114,7 +3284,7 @@ function drawAnnotationOnCanvas(ctx, a, W, H) {
   ctx.restore();
 }
 
-async function bakeRecording({ withCaptions, withAnnotations, onProgress }) {
+async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress }) {
   if (!S.recordedBlob) throw new Error('No recording to export');
 
   // 1) Source video — hidden, plays through end-to-end. Muted so the user's
@@ -3128,14 +3298,20 @@ async function bakeRecording({ withCaptions, withAnnotations, onProgress }) {
     srcVid.addEventListener('error', () => reject(new Error('Failed to load recording')), { once: true });
   });
 
-  const W = srcVid.videoWidth, H = srcVid.videoHeight;
-  if (!W || !H) { URL.revokeObjectURL(srcVid.src); throw new Error('Recording has no video dimensions'); }
+  const srcW = srcVid.videoWidth, srcH = srcVid.videoHeight;
+  if (!srcW || !srcH) { URL.revokeObjectURL(srcVid.src); throw new Error('Recording has no video dimensions'); }
   const duration = isFinite(srcVid.duration) ? srcVid.duration : 0;
 
-  // 2) Composition canvas — same dimensions so the output keeps native resolution.
+  // 2) Composition canvas — sized to the chosen aspect (Native = source dims).
+  // A non-native aspect runs a center-crop on the source (cover semantics).
+  const { tgtW: W, tgtH: H, srcCrop } = computeAspectFrame(srcW, srcH, aspect || 'native');
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { alpha: false });
+
+  // Pre-map annotations to target-relative coords once (per-frame mapping would
+  // be wasteful — annotation coords don't change across frames).
+  const mappedAnnotations = (S.annotations || []).map(a => mapAnnotationToTarget(a, srcW, srcH, srcCrop));
 
   // 3) Combined stream: canvas video + source audio.
   const srcStream = srcVid.captureStream();
@@ -3158,15 +3334,16 @@ async function bakeRecording({ withCaptions, withAnnotations, onProgress }) {
   const drawOne = () => {
     if (!alive) return;
     try {
-      ctx.drawImage(srcVid, 0, 0, W, H);
+      // Draw the source (cropped + scaled into the target canvas).
+      ctx.drawImage(srcVid, srcCrop.sx, srcCrop.sy, srcCrop.sw, srcCrop.sh, 0, 0, W, H);
       const t = srcVid.currentTime;
       if (withCaptions && S.transcript) {
         const seg = S.transcript.find(s => t >= s.start && t <= s.end);
         if (seg && seg.text) drawCaptionOnCanvas(ctx, seg.text, W, H);
       }
-      if (withAnnotations && S.annotations && S.annotations.length) {
-        for (const a of S.annotations) {
-          if (t >= a.startTime && t <= a.endTime) drawAnnotationOnCanvas(ctx, a, W, H);
+      if (withAnnotations && mappedAnnotations.length) {
+        for (const a of mappedAnnotations) {
+          if (t >= a.startTime && t <= a.endTime) drawAnnotationOnCanvas(ctx, a, W, H, srcVid, srcCrop);
         }
       }
       if (onProgress && duration > 0) {
@@ -3221,6 +3398,7 @@ async function exportWithOverlays() {
     const blob = await bakeRecording({
       withCaptions: hasCap,
       withAnnotations: hasAnn,
+      aspect: S.exportAspect,
       onProgress: (frac, msg) => setProgress(frac, msg),
     });
     setProgress(1, 'Export ready');
@@ -3228,7 +3406,8 @@ async function exportWithOverlays() {
     const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
     const base = active ? active.name.replace(/\.(webm|mp4)$/i, '') : filenameBase();
     const ext = mimeToExt(S.recordedMime);
-    downloadBlob(blob, base + '-burned.' + ext);
+    const aspectTag = S.exportAspect && S.exportAspect !== 'native' ? '-' + S.exportAspect.replace(':', 'x') : '';
+    downloadBlob(blob, base + '-burned' + aspectTag + '.' + ext);
     btn.textContent = '✓ Exported — click to redo';
     setTimeout(() => { btn.textContent = origLabel; }, 4000);
   } catch (e) {
@@ -3242,15 +3421,16 @@ async function exportWithOverlays() {
   }
 }
 
-// Reveal / hide the export button based on what's bakeable for the current recording.
+// Reveal / hide the burn-in export controls (aspect chips + export button) based on
+// what's bakeable for the current recording.
 function updateExportButtonVisibility() {
+  const wrap = $('exportWrap');
   const btn = $('btnExportBaked');
-  if (!btn) return;
+  if (!wrap || !btn) return;
   const hasCap = !!(S.transcript && S.transcript.length);
   const hasAnn = !!(S.annotations && S.annotations.length);
   const canExport = !!S.recordedBlob && (hasCap || hasAnn);
-  btn.classList.toggle('hidden', !canExport);
-  // Update label to reflect what's actually being baked
+  wrap.classList.toggle('hidden', !canExport);
   if (canExport) {
     if (hasCap && hasAnn)       btn.textContent = '🎬 Export with captions + annotations burned in';
     else if (hasCap)            btn.textContent = '🎬 Export with captions burned in';
@@ -3318,7 +3498,20 @@ function renderAnnotations() {
   const lineWidth = Math.max(4, Math.floor(Math.min(W, H) * 0.005));
   for (const a of (S.annotations || [])) {
     if (t < a.startTime || t > a.endTime) continue;
-    if (a.type === 'box') {
+    if (a.type === 'blur') {
+      // foreignObject + backdrop-filter is the only way to live-blur underlying
+      // video pixels from SVG. Falls back to a translucent dark rect in browsers
+      // that don't support backdrop-filter (older Firefox).
+      const fo = svgEl('foreignObject', {
+        x: a.x * W, y: a.y * H, width: a.w * W, height: a.h * H,
+      });
+      const div = document.createElement('div');
+      div.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+      const blurPx = Math.max(8, Math.min(W, H) * 0.018);
+      div.style.cssText = `width:100%;height:100%;background:rgba(20,20,28,0.12);backdrop-filter:blur(${blurPx}px);-webkit-backdrop-filter:blur(${blurPx}px);border:1px dashed rgba(216,72,42,0.5);box-sizing:border-box;`;
+      fo.appendChild(div);
+      svg.appendChild(fo);
+    } else if (a.type === 'box') {
       svg.appendChild(svgEl('rect', {
         x: a.x * W, y: a.y * H, width: a.w * W, height: a.h * H,
         fill: 'none', stroke: accent, 'stroke-width': lineWidth,
@@ -3403,7 +3596,7 @@ function renderAnnotList() {
     return;
   }
   list.innerHTML = (S.annotations || []).map(a => {
-    const icon = a.type === 'box' ? '▭' : a.type === 'arrow' ? '↗' : '🅰';
+    const icon = a.type === 'box' ? '▭' : a.type === 'arrow' ? '↗' : a.type === 'blur' ? '🌫' : '🅰';
     const desc = a.type === 'text' ? `"${escapeHtml(a.text || '')}"` : a.type;
     return `<div class="annot-item" data-id="${a.id}">
       <span class="annot-icon">${icon}</span>
@@ -3471,12 +3664,59 @@ $('mirrorToggle').addEventListener('change', e => {
   showWebcamCssPreview();
   saveOverlay();
 });
+function reflectLookChips() {
+  document.querySelectorAll('#lookChips .chip').forEach(c => c.classList.toggle('on', c.dataset.look === S.look));
+  const dot = $('lookColorDot');
+  if (dot) dot.style.background = S.lookColor || '#0a1420';
+}
+
 $('lookChips').addEventListener('click', e => {
-  if (!e.target.dataset.look) return;
-  $('lookChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
-  e.target.classList.add('on');
-  S.look = e.target.dataset.look;
+  const chip = e.target.closest('.chip');
+  if (!chip || !chip.dataset.look) return;
+  const look = chip.dataset.look;
+  // Color and Custom chips open their respective system pickers when clicked.
+  // Picking from those updates state in the input's change handler; clicking
+  // these chips while ALREADY active just re-opens the picker so you can change.
+  if (look === 'color') {
+    $('lookColorInput').click();
+    return;
+  }
+  if (look === 'custom') {
+    $('lookImageInput').click();
+    return;
+  }
+  S.look = look;
+  reflectLookChips();
   saveLook();
+});
+
+$('lookColorInput').addEventListener('input', e => {
+  S.lookColor = e.target.value;
+  S.look = 'color';
+  reflectLookChips();
+  saveLook();
+});
+
+$('lookImageInput').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file || !file.type.startsWith('image/')) return;
+  if (S.lookImageUrl) URL.revokeObjectURL(S.lookImageUrl);
+  S.lookImageUrl = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    S.lookImage = img;
+    S.look = 'custom';
+    reflectLookChips();
+    saveLook();
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(S.lookImageUrl);
+    S.lookImageUrl = null;
+    showWarning('Could not load that image.');
+  };
+  img.src = S.lookImageUrl;
+  // Reset the file input so picking the same file twice still fires change
+  e.target.value = '';
 });
 $('followCursorToggle').addEventListener('change', e => {
   S.followCursor = e.target.checked;
@@ -3540,6 +3780,16 @@ $('captionsToggle').addEventListener('change', () => {
 $('btnInsights').addEventListener('click', generateInsights);
 $('btnExportBaked').addEventListener('click', exportWithOverlays);
 
+// Export aspect chips — drives the burn-in re-encode crop math
+$('exportAspectChips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip || !chip.dataset.aspect) return;
+  $('exportAspectChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  chip.classList.add('on');
+  S.exportAspect = chip.dataset.aspect;
+  saveExport();
+});
+
 // Annotation tool chips
 $('annotToolChips').addEventListener('click', e => {
   const chip = e.target.closest('.chip');
@@ -3586,23 +3836,35 @@ $('annotList').addEventListener('click', e => {
       return;
     }
 
-    // Box / Arrow — drag flow with a dashed preview
+    // Box / Arrow / Blur — drag flow with a dashed preview.
+    // Box and Blur both draw as rectangles (blur preview gets a slate fill instead
+    // of the accent stroke to hint at what it'll redact in the export).
     annotDrawing = { x0: x, y0: y, type: annotDrawTool };
-    const preview = annotDrawing.type === 'box'
-      ? svgEl('rect', {
-          x, y, width: 0, height: 0,
-          fill: 'none', stroke: '#d8482a',
-          'stroke-width': Math.max(4, Math.floor(Math.min(W(), H()) * 0.005)),
-          'stroke-dasharray': '8,5', 'pointer-events': 'none',
-        })
-      : svgEl('line', {
-          x1: x, y1: y, x2: x, y2: y,
-          stroke: '#d8482a',
-          'stroke-width': Math.max(4, Math.floor(Math.min(W(), H()) * 0.005)),
-          'stroke-dasharray': '8,5',
-          'stroke-linecap': 'round',
-          'pointer-events': 'none',
-        });
+    let preview;
+    if (annotDrawing.type === 'box') {
+      preview = svgEl('rect', {
+        x, y, width: 0, height: 0,
+        fill: 'none', stroke: '#d8482a',
+        'stroke-width': Math.max(4, Math.floor(Math.min(W(), H()) * 0.005)),
+        'stroke-dasharray': '8,5', 'pointer-events': 'none',
+      });
+    } else if (annotDrawing.type === 'blur') {
+      preview = svgEl('rect', {
+        x, y, width: 0, height: 0,
+        fill: 'rgba(20,20,28,0.45)', stroke: '#98a8b8',
+        'stroke-width': Math.max(2, Math.floor(Math.min(W(), H()) * 0.003)),
+        'stroke-dasharray': '8,5', 'pointer-events': 'none',
+      });
+    } else {
+      preview = svgEl('line', {
+        x1: x, y1: y, x2: x, y2: y,
+        stroke: '#d8482a',
+        'stroke-width': Math.max(4, Math.floor(Math.min(W(), H()) * 0.005)),
+        'stroke-dasharray': '8,5',
+        'stroke-linecap': 'round',
+        'pointer-events': 'none',
+      });
+    }
     preview.id = '__annPreview';
     svg.appendChild(preview);
     try { svg.setPointerCapture(e.pointerId); } catch(_) {}
@@ -3613,7 +3875,7 @@ $('annotList').addEventListener('click', e => {
     const { x, y } = pointerToLocal(e);
     const preview = svg.querySelector('#__annPreview');
     if (!preview) return;
-    if (annotDrawing.type === 'box') {
+    if (annotDrawing.type === 'box' || annotDrawing.type === 'blur') {
       preview.setAttribute('x',      Math.min(annotDrawing.x0, x));
       preview.setAttribute('y',      Math.min(annotDrawing.y0, y));
       preview.setAttribute('width',  Math.abs(x - annotDrawing.x0));
@@ -3629,9 +3891,9 @@ $('annotList').addEventListener('click', e => {
     const { x, y } = pointerToLocal(e);
     const dx = x - annotDrawing.x0, dy = y - annotDrawing.y0;
     if (Math.hypot(dx, dy) > 12) {
-      if (annotDrawing.type === 'box') {
+      if (annotDrawing.type === 'box' || annotDrawing.type === 'blur') {
         addAnnotation({
-          type: 'box',
+          type: annotDrawing.type,
           startTime: recordedVideo.currentTime,
           endTime:   recordedVideo.currentTime + ANNOT_DURATION_SEC,
           x: Math.min(annotDrawing.x0, x) / W(),
@@ -3747,14 +4009,18 @@ document.addEventListener('keydown', e => {
 // Init
 loadOverlay();
 loadLook();
+loadExport();
 loadSettings();
 // Reflect loaded overlay state into the chip UI
 document.querySelectorAll('#sizeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.size === S.overlay.size));
 document.querySelectorAll('#shapeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.shape === S.overlay.shape));
 $('mirrorToggle').checked = !!S.overlay.mirror;
-// Reflect loaded Look state
-document.querySelectorAll('#lookChips .chip').forEach(c => c.classList.toggle('on', c.dataset.look === S.look));
+// Reflect loaded Look state (incl. solid-color dot)
+$('lookColorInput').value = /^#[0-9a-fA-F]{6}$/.test(S.lookColor) ? S.lookColor : '#0a1420';
+reflectLookChips();
 $('followCursorToggle').checked = !!S.followCursor;
+// Reflect loaded export aspect
+document.querySelectorAll('#exportAspectChips .chip').forEach(c => c.classList.toggle('on', c.dataset.aspect === S.exportAspect));
 // Reflect loaded settings into the form controls
 $('langSelect').value = S.settings.whisperLang;
 $('translateToggle').checked = !!S.settings.whisperTranslate;
