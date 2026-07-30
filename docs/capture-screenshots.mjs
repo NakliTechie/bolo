@@ -16,7 +16,7 @@ const { chromium } = require('playwright');
 const OUT = 'docs/screenshots';
 mkdirSync(OUT, { recursive: true });
 
-const URL = 'http://localhost:8765';
+const URL = process.env.BOLO_URL || 'http://localhost:8765';
 const VIEWPORT = { width: 1440, height: 900 };
 
 const browser = await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch());
@@ -63,6 +63,47 @@ async function shot(name) {
   console.log('shot:', name);
 }
 
+// v1.1.0: a realistic "Sales Dashboard" recorded frame so the on-device vision
+// captions/answers make sense. (Headless has no WebGPU, so the AI panels are
+// staged with the ACTUAL text FastVLM produced during verification.)
+async function mockDashboardRecording() {
+  await page.evaluate(() => {
+    document.querySelector('#modeChips [data-mode="studio"]').click();
+    document.getElementById('panelDone').classList.remove('hidden');
+    document.getElementById('labelDone').classList.remove('hidden');
+    const se = document.getElementById('stageEmpty'); if (se) se.style.display = 'none';
+    const c = document.createElement('canvas'); c.width = 1920; c.height = 1080;
+    const x = c.getContext('2d');
+    x.fillStyle = '#0b1220'; x.fillRect(0, 0, 1920, 1080);
+    x.fillStyle = '#0f1c30'; x.fillRect(0, 0, 1920, 96);
+    x.fillStyle = '#e6edf6'; x.font = 'bold 42px -apple-system,system-ui,sans-serif'; x.fillText('Sales Dashboard', 56, 62);
+    x.fillStyle = '#7cc4ff'; x.font = '26px -apple-system,system-ui'; x.fillText('Q3 revenue up 24%', 56, 150);
+    [['Revenue', '$1.24M', '#2dd4bf'], ['Active users', '8,412', '#60a5fa'], ['Conversion', '3.9%', '#f0abfc']].forEach(([l, v, col], i) => {
+      const cx = 56 + i * 460; x.fillStyle = '#111f36'; x.strokeStyle = '#1e3350'; x.lineWidth = 2;
+      x.beginPath(); x.roundRect(cx, 200, 420, 200, 16); x.fill(); x.stroke();
+      x.fillStyle = '#8aa0bd'; x.font = '24px -apple-system,system-ui'; x.fillText(l, cx + 28, 250);
+      x.fillStyle = '#f4f8ff'; x.font = 'bold 58px -apple-system,system-ui'; x.fillText(v, cx + 28, 330);
+      x.fillStyle = col; x.fillRect(cx + 28, 356, 120, 6);
+    });
+    const bx = 56, by = 470, bw = 1808, bh = 520; x.fillStyle = '#0e1a2c'; x.beginPath(); x.roundRect(bx, by, bw, bh, 16); x.fill();
+    [0.35, 0.5, 0.42, 0.62, 0.55, 0.78, 0.7, 0.9].forEach((h, i) => {
+      const w = 150, gap = (bw - 8 * w) / 9, px = bx + gap + i * (w + gap), ph = h * (bh - 100);
+      const g = x.createLinearGradient(0, by + bh - ph, 0, by + bh); g.addColorStop(0, '#3b82f6'); g.addColorStop(1, '#1d4ed8');
+      x.fillStyle = g; x.beginPath(); x.roundRect(px, by + bh - 50 - ph, w, ph, 8); x.fill();
+    });
+    const url = c.toDataURL('image/png');
+    const v = document.getElementById('recordedVideo');
+    Object.defineProperty(v, 'videoWidth', { configurable: true, value: 1920 });
+    Object.defineProperty(v, 'videoHeight', { configurable: true, value: 1080 });
+    Object.defineProperty(v, 'currentTime', { configurable: true, value: 4 });
+    v.classList.add('on'); v.removeAttribute('controls');
+    v.style.cssText = `display:block;position:relative;width:94%;max-width:94%;aspect-ratio:16/9;height:auto;max-height:94%;
+      background:#0b1220 url(${url}) center/contain no-repeat;border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.5);`;
+  });
+}
+
+// v1.0.0 shots — skip with NEW_ONLY=1 for a scoped v1.1.0 re-capture.
+if (!process.env.NEW_ONLY) {
 // ---------- 1) Empty idle state ----------
 await reset();
 await shot('01-empty');
@@ -200,6 +241,42 @@ await page.evaluate(() => {
   document.querySelector('.sidebar').scrollTop = 99999;
 });
 await shot('09-gallery');
+} // end v1.0.0 block
+
+// ---------- 10) Trim (mediabunny) ----------
+await reset();
+await mockDashboardRecording();
+await page.evaluate(() => {
+  document.getElementById('trimRange').textContent = '00:04 → 00:11';
+  document.getElementById('trimControls').scrollIntoView({ block: 'center' });
+});
+await shot('10-trim');
+
+// ---------- 11) Visual timeline (FastVLM) ----------
+await page.evaluate(() => {
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  document.getElementById('panelInsights').classList.remove('hidden');
+  const tl = [
+    [0, 'A sales dashboard on a dark background — “Sales Dashboard”, “Q3 revenue up 24%”, with metric cards and a bar chart.'],
+    [1, 'A settings page: “Notifications”, “Privacy”, “Account”.'],
+    [3, 'A red error screen reading “Error: Disk Full — Cannot save the file.”'],
+    [4, 'A green confirmation: “Payment Successful — $49.00 charged.”'],
+  ];
+  document.getElementById('visualTimelineList').innerHTML = tl.map(([t, cap]) =>
+    `<div class="chapter" data-time="${t}"><span class="ts">00:0${t}</span><span class="ch-title">${esc(cap)}</span></div>`).join('');
+  document.getElementById('btnVisualTimeline').textContent = '👁 Regenerate';
+  document.getElementById('panelInsights').scrollIntoView({ block: 'start' });
+});
+await shot('11-visual-timeline');
+
+// ---------- 12) Ask about this frame (image chat) ----------
+await page.evaluate(() => {
+  document.getElementById('chatQ').value = 'What is this screen showing?';
+  document.getElementById('chatAnswer').innerHTML =
+    '<div class="insight-summary"><span class="ts">00:04</span> This is a Sales Dashboard showing “Q3 revenue up 24%”, with metric cards for Revenue ($1.24M), Active users (8,412) and Conversion (3.9%), above a bar chart.</div>';
+  document.getElementById('chatAnswer').scrollIntoView({ block: 'center' });
+});
+await shot('12-image-chat');
 
 await browser.close();
 console.log('\nAll screenshots written to', OUT);

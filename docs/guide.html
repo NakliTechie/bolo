@@ -220,6 +220,22 @@
   }
   footer a { color: var(--accent); text-decoration: none; }
   footer a:hover { color: var(--accent-hover); }
+
+  /* Inline search (v1.1.0) */
+  .search-wrap {
+    position: sticky; top: 54px; z-index: 40;
+    margin: -8px 0 28px; padding: 10px 0;
+    background: linear-gradient(var(--bg) 78%, rgba(8, 16, 26, 0));
+  }
+  #guideSearch {
+    width: 100%; padding: 13px 16px; font-size: 15px;
+    color: var(--text); background: var(--bg-2);
+    border: 1px solid var(--border-2); border-radius: 10px; font-family: inherit;
+  }
+  #guideSearch::placeholder { color: var(--text-mute); }
+  #guideSearch:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .no-matches { text-align: center; color: var(--text-mute); padding: 48px 0; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -241,9 +257,14 @@
 
 <section class="hero">
   <h1>Record your screen.<br><span class="accent">Speak your mind.</span></h1>
-  <p class="tagline">Bolo is a single-file browser screen recorder. Captions, summaries, annotations, blur-in-export — all running on your machine. Nothing leaves your device.</p>
-  <p class="meta">Bolo v1.0.0 · <a href="https://bolo.naklitechie.com/">bolo.naklitechie.com</a></p>
+  <p class="tagline">Bolo is a single-file browser screen recorder. Captions, on-device vision that describes and answers questions about your recording, trim, annotations, blur-in-export — all running on your machine. Your recordings never leave your device.</p>
+  <p class="meta">Bolo v1.1.0 · <a href="https://bolo.naklitechie.com/">bolo.naklitechie.com</a></p>
 </section>
+
+<div class="search-wrap">
+  <input type="search" id="guideSearch" placeholder="Search the guide…  ( press / )" autocomplete="off" aria-label="Search the guide">
+</div>
+<p id="noMatches" class="no-matches" hidden>No features match that search.</p>
 
 <nav class="toc">
   <h2>Contents</h2>
@@ -255,6 +276,9 @@
     <li><a href="#record">Record</a></li>
     <li><a href="#captions">Captions (Whisper)</a></li>
     <li><a href="#insights">AI insights</a></li>
+    <li><a href="#visual-timeline">Visual timeline</a></li>
+    <li><a href="#image-chat">Ask about a frame</a></li>
+    <li><a href="#trim">Trim</a></li>
     <li><a href="#annotations">Annotations &amp; blur</a></li>
     <li><a href="#export">Export</a></li>
     <li><a href="#gallery">Gallery</a></li>
@@ -364,8 +388,45 @@
   <p>First run downloads ~350 MB of model weights, cached forever. The insights are stored on the recording's history entry so they survive reloads.</p>
 </section>
 
+<section id="visual-timeline">
+  <h2><span class="step">8</span>Visual timeline</h2>
+  <p><span class="ink">Studio mode only.</span> Bolo can <span class="ink">watch your recording back</span>. Click <span class="ink">👁 Describe key moments</span> in the AI Insights panel — it samples key frames and describes what's on screen at each, producing a clickable timeline.</p>
+  <figure>
+    <img src="screenshots/11-visual-timeline.jpg" alt="The Visual timeline populated with four timestamped descriptions of on-screen content.">
+    <figcaption>Four key moments, each described by the on-device vision model. Click a moment to seek.</figcaption>
+  </figure>
+  <ul>
+    <li>Runs <span class="ink">FastVLM-0.5B</span>, a small vision-language model, on WebGPU (Transformers.js v4). First run downloads ~450 MB, then cached forever.</li>
+    <li>Works <span class="ink">even with no audio</span> — a silent screen capture still gets a usable summary, where captions have nothing to transcribe.</li>
+    <li>Reads <span class="ink">on-screen text</span> well — dashboards, error dialogs, terminals, labels.</li>
+  </ul>
+</section>
+
+<section id="image-chat">
+  <h2><span class="step">9</span>Ask about a frame</h2>
+  <p><span class="ink">Studio mode only.</span> Pause the playback on any moment, type a question in <span class="ink">💬 Ask about this frame</span>, and the same on-device vision model answers about what's on screen right then.</p>
+  <figure>
+    <img src="screenshots/12-image-chat.jpg" alt="The Ask about this frame panel — a question and a timestamped answer describing the dashboard on screen.">
+    <figcaption>Ask "what is this screen showing?" and get an answer grounded in the current frame.</figcaption>
+  </figure>
+  <p>Great for reading an error off a recording, checking what a dashboard said, or pulling text out of a frame — <span class="ink">"what does this error say?"</span>, <span class="ink">"what's the revenue number?"</span>. It shares the visual-timeline model, so there's no extra download.</p>
+</section>
+
+<section id="trim">
+  <h2><span class="step">10</span>Trim</h2>
+  <p>Cut the recording down to the part that matters — entirely in the browser. Scrub the playback to where the clip should start and click <span class="ink">⊣ Start = playhead</span>, scrub to the end and click <span class="ink">End = playhead ⊢</span>, then <span class="ink">✂ Trim to selection</span>.</p>
+  <figure>
+    <img src="screenshots/10-trim.jpg" alt="The Trim controls in the Recording Ready panel — a 00:04 to 00:11 selection, Start/End = playhead buttons, and Trim to selection.">
+    <figcaption>Mark in/out from the playhead, then trim. The current selection shows above the buttons.</figcaption>
+  </figure>
+  <p>Trim re-encodes locally via <span class="ink">mediabunny</span> (a pure-WebCodecs media toolkit) — frame-accurate, usually a second or two, and nothing leaves your device. It replaces the recording in place and updates the gallery entry.</p>
+  <div class="callout warn">
+    <strong>Heads up:</strong> trimming shifts every timestamp, so it clears any captions, AI insights, and visual timeline on that recording — regenerate them after the cut.
+  </div>
+</section>
+
 <section id="annotations">
-  <h2><span class="step">8</span>Annotations &amp; blur</h2>
+  <h2><span class="step">11</span>Annotations &amp; blur</h2>
   <p><span class="ink">Studio mode only.</span> The <span class="ink">Annotations</span> panel adds four draw tools you can use directly on the playback:</p>
   <ul>
     <li><span class="ink">↗ Arrow</span> — click + drag from tail to head.</li>
@@ -385,7 +446,7 @@
 </section>
 
 <section id="export">
-  <h2><span class="step">9</span>Export</h2>
+  <h2><span class="step">12</span>Export</h2>
   <p>Bolo has two export paths:</p>
   <h3>↓ Download (instant)</h3>
   <p>The original captured WebM/MP4 plus a sidecar <code>.srt</code> if you have captions. VLC, IINA, mpv all auto-load the SRT. Native, no re-encoding.</p>
@@ -408,7 +469,7 @@
 </section>
 
 <section id="gallery">
-  <h2><span class="step">10</span>Gallery</h2>
+  <h2><span class="step">13</span>Gallery</h2>
   <p>The <span class="ink">Recent recordings</span> panel at the bottom of the sidebar lists everything you've captured this session and prior — Bolo persists recordings into your browser's OPFS (Origin Private File System).</p>
   <figure>
     <img src="screenshots/09-gallery.jpg" alt="Recent recordings list with three items, the top one showing captions, insights, and annotation badges.">
@@ -431,7 +492,7 @@
 </section>
 
 <section id="shortcuts">
-  <h2><span class="step">11</span>Keyboard shortcuts</h2>
+  <h2><span class="step">14</span>Keyboard shortcuts</h2>
   <table>
     <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
     <tbody>
@@ -444,11 +505,11 @@
 </section>
 
 <section id="privacy">
-  <h2><span class="step">12</span>Privacy</h2>
+  <h2><span class="step">15</span>Privacy</h2>
   <p class="callout privacy">
-    <strong>Everything stays on your device.</strong> There is no backend. There never will be. Bolo's only network calls are the one-time downloads of Whisper (~250 MB) and Qwen (~350 MB) from the Hugging Face CDN — and those land in your browser's Cache Storage, accessible only to this site. Close the tab and your recordings stay in your private OPFS, visible only to you, only on this device. Use Download to copy anything to disk.
+    <strong>Everything stays on your device.</strong> There is no backend. There never will be. Bolo's only network calls are the one-time downloads of its open models and libraries — Whisper (~250 MB) and Qwen (~350 MB) from the Hugging Face CDN, FastVLM (~450 MB) for the visual timeline and frame Q&amp;A, and the mediabunny trim toolkit from jsDelivr — all of which land in your browser's Cache Storage, accessible only to this site, and work offline once cached. Close the tab and your recordings stay in your private OPFS, visible only to you, only on this device. Use Download to copy anything to disk.
   </p>
-  <p>No telemetry. No analytics. No accounts. No share links. No cloud upload. The transcripts, the AI insights, the annotations, the blur regions — all generated locally and stored locally.</p>
+  <p>No telemetry. No analytics. No accounts. No share links. No cloud upload. The transcripts, the AI insights, the visual timeline, the frame answers, the annotations, the blur regions, the trims — all generated locally and stored locally. Your recordings never leave your device.</p>
 </section>
 
 </main>
@@ -459,6 +520,32 @@
     MIT licensed — <a href="https://github.com/NakliTechie/bolo">source on GitHub</a>.
   </p>
 </footer>
+
+<script>
+  // Inline search — filter feature sections live by their text content.
+  (function () {
+    var box = document.getElementById('guideSearch');
+    var none = document.getElementById('noMatches');
+    var toc = document.querySelector('nav.toc');
+    var sections = Array.prototype.slice.call(document.querySelectorAll('main > section:not(.hero)'));
+    function apply() {
+      var q = box.value.trim().toLowerCase();
+      var shown = 0;
+      sections.forEach(function (s) {
+        var match = !q || s.textContent.toLowerCase().indexOf(q) !== -1 || (s.id || '').indexOf(q) !== -1;
+        s.classList.toggle('hidden', !match);
+        if (match) shown++;
+      });
+      if (toc) toc.classList.toggle('hidden', !!q);       // hide the Contents list while searching
+      none.hidden = !(q && shown === 0);
+    }
+    box.addEventListener('input', apply);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === '/' && document.activeElement !== box) { e.preventDefault(); box.focus(); }
+      else if (e.key === 'Escape' && (document.activeElement === box || box.value)) { box.value = ''; apply(); box.blur(); }
+    });
+  })();
+</script>
 
 </body>
 </html>
