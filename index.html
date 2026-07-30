@@ -1399,6 +1399,7 @@ const S = {
   chunks: [],
   recordedBlob: null,
   recordedMime: '',
+  hadAudio: false,      // did the recording capture any audio track? (gates transcription)
   recordStartTime: 0,
   pausedTime: 0,
   lastPauseAt: 0,
@@ -2201,6 +2202,12 @@ function buildCompositeStream() {
   if (S.streams.mic) audioTracks.push(...S.streams.mic.getAudioTracks());
   if (S.streams.screen) audioTracks.push(...S.streams.screen.getAudioTracks());
 
+  // Remember whether ANY audio track made it into the recording. Whisper has
+  // nothing to transcribe without one, and screen-only captures on macOS often
+  // carry no system audio — so we can give an accurate message instead of the
+  // misleading "could not decode audio" when the user later hits Generate Captions.
+  S.hadAudio = audioTracks.length > 0;
+
   return new MediaStream([...videoTracks, ...audioTracks]);
 }
 
@@ -2460,6 +2467,7 @@ function pushHistory(blob, mime) {
     sizeBytes: blob.size,
     timestamp: new Date().toISOString(),
     name: filenameBase() + '.' + mimeToExt(mime),
+    hadAudio: S.hadAudio,
     transcript: null,
     insights: null,
     annotations: [],
@@ -2505,6 +2513,7 @@ function loadHistoryItem(id) {
   if (!item) return;
   S.recordedBlob = item.blob;
   S.recordedMime = item.mime;
+  S.hadAudio = item.hadAudio;   // may be undefined for items recorded before this field existed → treated as "unknown", transcription still attempted
   S.activeHistoryId = item.id;
   if (recordedVideo.src) URL.revokeObjectURL(recordedVideo.src);
   recordedVideo.src = URL.createObjectURL(item.blob);
@@ -2872,6 +2881,7 @@ function segmentsFromWhisperResult(result, fallbackDuration) {
 // same promise; if after, it's instant.
 function startPreTranscribe() {
   if (!S.recordedBlob) return;
+  if (S.hadAudio === false) return; // nothing to transcribe — don't waste a model load + decode
   if (S.transcript) return; // already have one
   const key = preTranscribeKey();
   // Already running or completed for these inputs?
@@ -2925,6 +2935,12 @@ function invalidatePreTranscribe() {
 
 async function transcribeRecording() {
   if (!S.recordedBlob) return;
+  // No audio track was captured — Whisper has nothing to work with. Say so
+  // plainly instead of letting the decode fail with a misleading error.
+  if (S.hadAudio === false) {
+    showWarning('This recording has no audio to transcribe. Turn on the Mic source (or share a browser tab with its audio) before recording to get captions.');
+    return;
+  }
   setState('transcribing');
   $('btnTranscribe').disabled = true;
   $('btnTranscribe').textContent = '⏳ Transcribing…';
@@ -2959,7 +2975,10 @@ async function transcribeRecording() {
       try {
         extracted = await extractAudioFromBlob(S.recordedBlob);
       } catch (e) {
-        showWarning('Could not decode audio from the recording. Did you include a mic or system audio?');
+        // We only reach here when an audio track WAS captured (the no-audio case
+        // is caught earlier) or the recording predates the hadAudio flag — so this
+        // is a genuine decode failure, not a missing-mic situation.
+        showWarning('Couldn’t decode this recording’s audio track. It may be silent or in an unsupported format.');
         throw e;
       }
       setProgress(0.3, 'Running Whisper in worker (~30s per minute of audio — UI stays responsive)…');
@@ -2969,6 +2988,11 @@ async function transcribeRecording() {
 
     setProgress(1, 'Done');
     setTimeout(hideProgress, 600);
+
+    // Audio was present but Whisper heard no speech (silent mic, music-only tab, etc.)
+    if (segments.length === 0) {
+      showWarning('Transcription finished, but no speech was detected in the audio.');
+    }
 
     S.transcript = segments;
     renderTranscript();
