@@ -2,7 +2,7 @@
 
 **Record your screen. Speak your mind. Nothing leaves your device.**
 
-Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, transcribes audio locally via Whisper, and exports a finished file — all in your browser. No account, no server, no upload, no telemetry.
+Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, transcribes audio locally via Whisper, **describes and answers questions about your recording with an on-device vision model**, **trims in the browser**, and exports a finished file — all on your machine. No account, no server, no upload, no telemetry.
 
 ## What it does
 
@@ -14,6 +14,9 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 - **Local Whisper transcription** via Transformers.js. Whisper Small (~250 MB, downloaded once and cached), 15 languages, auto-detect, translate-to-English toggle. Pre-transcription kicks off the moment you stop recording so clicking Generate Captions is usually instant.
 - **Editable transcript** with click-to-seek timestamps and a live captions overlay during playback.
 - **Local AI insights** — after transcription, click ✨ to generate a short title, a one-paragraph summary, and clickable chapter markers. Qwen 2.5 0.5B Instruct runs on WebGPU via Transformers.js v4 (~350 MB, downloaded once on first use, cached forever).
+- **Visual timeline (on-device vision)** — *Studio.* Click 👁 **Describe key moments** and a small vision-language model (FastVLM-0.5B, WebGPU, ~450 MB once) samples key frames and describes what's on screen at each — a clickable timeline that works **even with no audio**, so a silent screen capture still gets a usable summary. Reads on-screen text well (dashboards, error dialogs, terminals).
+- **Ask about a frame** — *Studio.* Pause on any moment, type a question ("what does this error say?", "what's the revenue number?"), and the same on-device vision model answers about what's on screen right then. Shares the visual-timeline model — no extra download.
+- **In-browser trim** — scrub the playback, mark in/out from the playhead, then cut. Frame-accurate, re-encoded locally via [mediabunny](https://github.com/Vanilagy/mediabunny) (pure-WebCodecs, no ffmpeg) — usually a second or two, and nothing leaves your device. Replaces the recording in place.
 - **Post-record annotations** — four draw tools (arrow, box, text, **blur**) drawable on the playback. Each is visible for 3 seconds from the moment you draw it. Render as an SVG overlay live (with `backdrop-filter:blur` for the blur tool); bake into the export when you choose "Export with overlays burned in". The blur tool is the OpenScreen-inspired redaction box — drag over a credit card / password / PII region and it pixelates in the export.
 - **Burn-in export with aspect-ratio presets** — re-encode the recording with captions and/or annotations baked into the pixels (so the result works on YouTube / Twitter / embedded players where a sidecar `.srt` doesn't). Pick a target aspect ratio — **Native / 1:1 / 9:16 / 16:9** — and the bake pipeline center-crops + re-frames for social. Drives a canvas + MediaRecorder pipeline from the source video's `requestVideoFrameCallback`, with audio passing through via `srcVid.captureStream().getAudioTracks()`. ~1× real-time — a 5-minute recording takes ~5 minutes to bake.
 - **SRT / VTT / TXT subtitle export**. Download bundles a same-name `.srt` automatically so VLC, IINA and mpv auto-load it. For caption burn-in, run `ffmpeg -i in.webm -vf subtitles=in.srt out.mp4` at the shell (Bolo's in-browser burn-in is deferred — see *Known limitations*).
@@ -35,7 +38,7 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 ## Known limitations
 
 - **Caption + annotation burn-in is real-time, not faster.** The export pipeline plays the recording end-to-end through a hidden video element and re-encodes via MediaRecorder, so a 5-minute recording takes ~5 minutes to bake. The fallback Download button still bundles a sidecar `.srt` for the no-burn-in path.
-- **No in-browser trim yet.** `@ffmpeg/ffmpeg` 0.12's ESM wrapper spawns its own class worker from `dist/esm/worker.js`, which contains relative module imports (`./const.js`, `./errors.js`) that can't resolve when the worker is loaded via a cross-origin blob URL. The package was designed to be hosted same-origin. Every CDN-based workaround I tried either hung silently or threw a `SecurityError`. Self-hosting the worker files would break Bolo's single-HTML-file constraint. Workaround that still works: trim externally in QuickTime/VLC. A future investigation may try `mediabunny` or a pure-WebCodecs path.
+- **The vision features need WebGPU + cross-origin isolation.** The visual timeline and frame Q&A run FastVLM on WebGPU; on the deployed site this works out of the box (COOP/COEP headers ship in `_headers`). Serving locally over plain `python3 -m http.server` isn't cross-origin-isolated, so the vision model falls back to a single-threaded path and stalls — use a server that sends `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` for local vision dev. (Whisper captions work either way.)
 
 ## Philosophy
 
@@ -53,6 +56,8 @@ Your recording, transcript, and edits never leave this page. There is no backend
 - Frame-diff motion centroid on a 64×36 offscreen canvas for the follow-cursor zoom — sampled at ~5 FPS with low-pass smoothing
 - [Transformers.js v2.17](https://github.com/xenova/transformers.js) with `Xenova/whisper-small` for local transcription
 - [Transformers.js v4](https://github.com/huggingface/transformers.js) with `onnx-community/Qwen2.5-0.5B-Instruct` (q4f16, WebGPU) for AI insights
+- [Transformers.js v4](https://github.com/huggingface/transformers.js) with `onnx-community/FastVLM-0.5B-ONNX` (WebGPU) for the visual timeline and frame Q&A — an instruct vision-language model reused for both
+- [mediabunny](https://github.com/Vanilagy/mediabunny) (pure-WebCodecs, zero-dependency) for in-browser trim — no ffmpeg, no WASM worker
 - [Document Picture-in-Picture API](https://developer.mozilla.org/en-US/docs/Web/API/Document_Picture-in-Picture_API) for cross-tab recording control
 - [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) for persistent recording gallery
 - [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) for direct-to-disk saves

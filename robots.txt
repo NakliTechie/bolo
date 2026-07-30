@@ -1,0 +1,5 @@
+# Bolo — browser-native screen recorder. Everything runs on your device.
+# https://bolo.naklitechie.com
+
+User-agent: *
+Allow: /

@@ -1,0 +1,39 @@
+# Bolo
+
+> A single-HTML-file, browser-native screen recorder. It records screen + webcam + mic and processes everything on-device: local Whisper captions, an on-device vision model (FastVLM) that describes and answers questions about the recording, AI title/summary/chapters, frame-accurate in-browser trim, annotations, and burn-in export. No account, no server, no upload, no telemetry — recordings never leave the browser.
+
+Bolo is a UI-driven web app, not a programmatic API. There is no public `window` object, no message channel, and no server endpoint — everything happens in the page. To use it, open the app and drive the UI. It's one HTML file with no build step.
+
+## How to use
+
+1. Open https://bolo.naklitechie.com (or `index.html` locally).
+2. Toggle **Screen / Webcam / Mic** sources in the right sidebar and grant permission. A **Quick / Studio** toggle sits in the header — Studio unlocks Looks, follow-cursor zoom, AI insights, the vision features, annotations, and burn-in export.
+3. Hit Record (`⌘⇧B`). A 3-2-1 countdown, then it captures.
+4. Stop via the floating control bar. Then, on the finished recording:
+   - **Generate Captions** — local Whisper (15 languages, auto-detect, translate-to-English).
+   - **Describe key moments** (Studio) — the visual timeline: keyframe descriptions; works even with no audio.
+   - **Ask about this frame** (Studio) — pause on a moment and ask a natural-language question about it.
+   - **Trim** — mark in/out from the playhead and cut, in-browser and frame-accurate.
+   - **Generate title / summary / chapters** (Studio) — from the transcript.
+   - **Annotations** (Studio) — arrow / box / text / blur, baked into the export.
+   - **Download** — original WebM/MP4 plus a sidecar `.srt`; or **Export with overlays burned in** (aspect presets: Native / 1:1 / 9:16 / 16:9).
+
+## On-device models (downloaded once from a CDN, then cached; work offline after)
+
+- Whisper Small (~250 MB) — transcription. Transformers.js v2, WASM.
+- Qwen 2.5 0.5B Instruct (~350 MB) — title/summary/chapters. Transformers.js v4, WebGPU.
+- FastVLM-0.5B (~450 MB) — visual timeline + frame Q&A. Transformers.js v4, WebGPU. Needs cross-origin isolation (shipped via the site's `_headers`).
+- mediabunny (small, from jsDelivr) — pure-WebCodecs in-browser trim (no ffmpeg, no WASM worker).
+
+## File formats
+
+- Output video: WebM (VP9/VP8, Opus) or MP4 (H.264/AAC) — whichever the browser supports best.
+- Captions: SRT / VTT / TXT export; SRT is bundled as a sidecar on Download.
+- Storage: recordings persist in the browser's OPFS (private filesystem, ~500 MB cap, FIFO eviction). Nothing is uploaded.
+
+## Links
+
+- App: https://bolo.naklitechie.com
+- User guide: https://bolo.naklitechie.com/docs/guide.html
+- Source (MIT): https://github.com/NakliTechie/bolo
+- Author / series: https://naklitechie.github.io

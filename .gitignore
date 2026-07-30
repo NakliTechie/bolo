@@ -4,6 +4,8 @@
 !LICENSE
 !.gitignore
 !_headers
+!robots.txt
+!llms.txt
 !docs
 !docs/**
 !marketing
