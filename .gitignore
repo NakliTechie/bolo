@@ -6,6 +6,8 @@
 !_headers
 !docs
 !docs/**
+!marketing
+!marketing/**
 
 # wrangler files
 .wrangler
