@@ -1156,6 +1156,14 @@
         <div class="chapters-list" id="visualTimelineList" style="margin-top:8px"></div>
         <div class="hint" style="margin-top:8px">FastVLM-0.5B (vision) runs locally on WebGPU — first run downloads ~450 MB, then cached forever. It samples key frames and describes what’s on screen, so you get a summary <strong>even with no audio</strong>. Click a moment to seek.</div>
       </div>
+
+      <div style="border-top:1px solid var(--border-2); margin-top:14px; padding-top:12px">
+        <div style="font-weight:600; margin-bottom:6px">💬 Ask about this frame</div>
+        <div class="hint" style="margin-bottom:6px">Pause on any moment, then ask — the same on-device vision model answers about what’s on screen right then (reading errors, labels, code). Shares the model above, so no extra download.</div>
+        <input type="text" id="chatQ" placeholder="e.g. What does this error message say?" autocomplete="off">
+        <button class="btn" id="btnChatAsk" style="margin-top:6px">Ask</button>
+        <div id="chatAnswer" style="margin-top:8px"></div>
+      </div>
     </div>
 
     <!-- Status / progress -->
@@ -3567,6 +3575,48 @@ function renderVisualTimeline() {
   if (btn) btn.textContent = '👁 Regenerate';
 }
 
+// ---------- Image chat (ask about the current frame — reuses the FastVLM worker) ----------
+// FastVLM is an instruct vision model, so "chat about a frame" is the same caption
+// path with the user's question as the prompt — no second model to download, it
+// shares the visual-timeline model. (Liquid's LFM2.5-VL-1.6B was the original idea,
+// but its ONNX export is raw-onnxruntime-shaped, not a transformers.js drop-in; the
+// 450M variant is, and could be added as a heavier "second opinion" model later.)
+async function askAboutFrame() {
+  if (!S.recordedBlob) return;
+  const q = ($('chatQ').value || '').trim();
+  if (!q) { showWarning('Type a question about the current frame first.'); return; }
+  const btn = $('btnChatAsk'), ans = $('chatAnswer');
+  btn.disabled = true; btn.textContent = '⏳…'; hideWarning();
+  try {
+    let lastPct = -1;
+    await loadVlm((p) => {
+      if (p.status === 'progress') { const pct = Math.round(p.progress || 0); if (pct > lastPct + 4) { lastPct = pct; setProgress(pct / 100, `Downloading vision model… ${pct}%`); } }
+      else if (p.status === 'loading') { setProgress(0.95, 'Loading vision model into memory…'); }
+      else if (p.status === 'ready') { setProgress(1, 'Vision model ready'); }
+    });
+    btn.textContent = '⏳ Looking…';
+    // Grab the frame currently shown in playback, downscaled for fast encoding.
+    const v = recordedVideo;
+    const vw = v.videoWidth || 1280, vh = v.videoHeight || 720;
+    const scale = Math.min(1, 512 / Math.max(vw, vh));
+    const cw = Math.max(1, Math.round(vw * scale)), ch = Math.max(1, Math.round(vh * scale));
+    const canvas = Object.assign(document.createElement('canvas'), { width: cw, height: ch });
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, cw, ch);
+    const frame = ctx.getImageData(0, 0, cw, ch);
+    const t = v.currentTime;
+    const answer = await captionFrame(frame, q, { maxNewTokens: 160 });
+    setProgress(1, 'Done'); setTimeout(hideProgress, 400);
+    ans.innerHTML = `<div class="insight-summary"><span class="ts">${fmtTs(Math.round(t))}</span> ${escapeHtml(answer || '(no answer)')}</div>`;
+  } catch (e) {
+    console.error('Ask failed', e);
+    showWarning('Ask failed: ' + e.message);
+    hideProgress();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Ask';
+  }
+}
+
 // ---------- Burn-in export (captions + annotations baked into a new WebM/MP4) ----------
 // Honest postmortem in commit a75474b: @ffmpeg/ffmpeg 0.12.x cannot be loaded
 // cross-origin from a single-file deployment — its internal classWorker has
@@ -4193,6 +4243,8 @@ $('captionsToggle').addEventListener('change', () => {
 
 $('btnInsights').addEventListener('click', generateInsights);
 $('btnVisualTimeline').addEventListener('click', generateVisualTimeline);
+$('btnChatAsk').addEventListener('click', askAboutFrame);
+$('chatQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); askAboutFrame(); } });
 $('btnExportBaked').addEventListener('click', exportWithOverlays);
 
 // Export aspect chips — drives the burn-in re-encode crop math
