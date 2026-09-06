@@ -4,6 +4,12 @@
 
 Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, transcribes audio locally via Whisper, **describes and answers questions about your recording with an on-device vision model**, **trims in the browser**, and exports a finished file — all on your machine. No account, no server, no upload, no telemetry.
 
+## Try it
+
+**→ [bolo.naklitechie.com](https://bolo.naklitechie.com/)** — nothing to install, nothing to sign up for.
+
+Or open `index.html` directly in Chrome — it works from `file://` too.
+
 ## What it does
 
 - **Screen + webcam + mic capture** via `getDisplayMedia` / `getUserMedia`
@@ -85,10 +91,6 @@ python3 -m http.server 8000
 Open [http://localhost:8000](http://localhost:8000). That's it.
 
 Or just open `index.html` directly in Chrome — works from `file://` too.
-
-## Live demo
-
-[**bolo.naklitechie.com**](https://bolo.naklitechie.com/)
 
 ## User guide
 
