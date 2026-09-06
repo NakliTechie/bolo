@@ -9,9 +9,23 @@
 
 import { createRequire } from 'module';
 import { mkdirSync } from 'fs';
-// Playwright lives in node 22.19's global modules; resolve from there.
-const require = createRequire('/Users/chiragpatnaik/.nvm/versions/node/v22.19.0/lib/node_modules/_marker');
-const { chromium } = require('playwright');
+import { homedir } from 'os';
+import { join } from 'path';
+// Bolo is single-file and ships no node_modules. Resolve Playwright from the
+// first place that has it: $PLAYWRIGHT_DIR, the cwd, or a sibling naklios
+// project that installed it. (`npm i -D playwright` in any of these works.)
+function loadPlaywright() {
+  const anchors = [
+    process.env.PLAYWRIGHT_DIR,
+    process.cwd(),
+    ...['Reckon', 'Draft', 'Tijori', 'Slate'].map(p => join(homedir(), 'Code/naklios-universe', p)),
+  ].filter(Boolean);
+  for (const dir of anchors) {
+    try { return createRequire(join(dir, 'noop.js'))('playwright'); } catch (e) { /* try next */ }
+  }
+  throw new Error('playwright not found — run `npm i -D playwright` here or set PLAYWRIGHT_DIR to a project that has it');
+}
+const { chromium } = loadPlaywright();
 
 const OUT = 'docs/screenshots';
 mkdirSync(OUT, { recursive: true });
