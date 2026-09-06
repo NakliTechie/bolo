@@ -319,7 +319,7 @@
     <li><span class="ink">Webcam</span> — your camera, optionally drag-positioned and shaped (square / rounded / circle).</li>
     <li><span class="ink">Mic</span> — your microphone, with a live level meter.</li>
   </ul>
-  <p>You can mix any combination. Screen + webcam composites the webcam as a draggable picture-in-picture overlay during recording.</p>
+  <p>You can mix any combination. Screen + webcam composites the webcam as a draggable picture-in-picture overlay during recording. The <span class="ink">Webcam overlay</span> panel (Studio) sets its size, shape and mirror — and a <span class="ink">Dynamic bubble</span> toggle that, with the mic on, swells the webcam while you speak and shrinks it when you pause (loudness-driven, smoothed so it breathes rather than jitters).</p>
   <div class="callout">
     <strong>Tip:</strong> if Bolo detects you accidentally picked its own tab as the screen source (which would create a feedback loop), it stops the share and warns you.
   </div>
@@ -450,21 +450,25 @@
   <p>Bolo has two export paths:</p>
   <h3>↓ Download (instant)</h3>
   <p>The original captured WebM/MP4 plus a sidecar <code>.srt</code> if you have captions. VLC, IINA, mpv all auto-load the SRT. Native, no re-encoding.</p>
-  <h3>🎬 Export with overlays burned in</h3>
-  <p><span class="ink">Studio mode only.</span> Re-encodes the recording with captions and/or annotations baked into the pixels. Useful when the destination doesn't understand sidecar SRT — YouTube, Twitter, embedded players, social media.</p>
+  <h3>🎬 Export video</h3>
+  <p><span class="ink">Studio mode only.</span> Re-encodes the recording with any combination of transforms applied — captions and/or annotations baked into the pixels, a target aspect ratio, a playback speed, a quality cap, and an imported audio track. Useful when the destination doesn't understand sidecar SRT — YouTube, Twitter, embedded players, social media. With nothing selected, the button just hands back the untouched recording (same as Download).</p>
   <figure>
-    <img src="screenshots/08-burn-in-export.jpg" alt="Burn-in export button with aspect-ratio chips: Native / 1:1 / 9:16 / 16:9.">
-    <figcaption>The burn-in export with aspect-ratio presets. Pick the right shape for the destination.</figcaption>
+    <img src="screenshots/08-burn-in-export.jpg" alt="Export panel with aspect, speed, quality and audio chip rows.">
+    <figcaption>The export panel. Stack any transforms; the filename records which ones you picked.</figcaption>
   </figure>
+  <p><span class="ink">Aspect</span> — pick the shape for the destination. Non-native aspects use <span class="ink">cover semantics</span> (center-cropped to fill):</p>
   <ul>
     <li><span class="ink">Native</span> keeps the source resolution.</li>
     <li><span class="ink">1:1</span> exports 1080 × 1080 (Instagram feed, square cards).</li>
     <li><span class="ink">9:16</span> exports 1080 × 1920 (Instagram Reels, TikTok, vertical social).</li>
     <li><span class="ink">16:9</span> exports 1920 × 1080 (YouTube, embeds, presentations).</li>
   </ul>
-  <p>Non-native aspects use <span class="ink">cover semantics</span> — the source is center-cropped to fill the target frame. The output filename gains a <code>-1x1</code> / <code>-9x16</code> / <code>-16x9</code> suffix.</p>
+  <p><span class="ink">Speed</span> — <code>0.5×</code> / <code>1×</code> / <code>1.5×</code> / <code>2×</code>. Time-lapse a slow build, or slow-mo a fast interaction. Applied via the source video's <code>playbackRate</code>, so audio re-times with it.</p>
+  <p><span class="ink">Quality</span> — <code>Source</code> keeps native resolution; <code>1080p</code> / <code>720p</code> downscale and lower the bitrate to shrink the file for sharing.</p>
+  <p><span class="ink">🎵 Add music / voiceover</span> — import an audio file and it's mixed into the export, with a volume slider balancing it against the original audio. Turn a silent screen capture into a scored or narrated clip. The bed is session-only and never uploaded; it clears when you start a new recording.</p>
+  <p>The output filename records what you applied — e.g. <code>-export-9x16-2x-medium</code>.</p>
   <div class="callout warn">
-    <strong>Export speed:</strong> burn-in re-encodes via canvas + MediaRecorder driven by the source video's <code>requestVideoFrameCallback</code>. Roughly real-time — a 5-minute recording takes ~5 minutes to bake. The progress bar shows the playhead so you know how far along it is.
+    <strong>Export speed:</strong> the bake re-encodes via canvas + MediaRecorder driven by the source video's <code>requestVideoFrameCallback</code>. Roughly real-time at 1× — a 5-minute recording takes ~5 minutes to bake (a 2× speed export finishes in about half that). The progress bar shows the playhead so you know how far along it is.
   </div>
 </section>
 

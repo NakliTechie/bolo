@@ -1049,6 +1049,11 @@
           <input type="checkbox" id="mirrorToggle" checked>
           <span>Mirror (flip horizontally)</span>
         </label>
+        <label class="toggle-row" style="margin-top:6px">
+          <input type="checkbox" id="autoSizeToggle">
+          <span>Dynamic bubble — grows when you speak</span>
+        </label>
+        <div class="hint" style="margin-top:4px">Needs the mic on. The webcam swells while you talk, shrinks when you pause.</div>
       </div>
     </div>
 
@@ -1099,7 +1104,30 @@
             <span class="chip" data-aspect="9:16">9:16</span>
             <span class="chip" data-aspect="16:9">16:9</span>
           </div>
-          <button class="btn" id="btnExportBaked" style="margin-top:6px; width:100%;">🎬 Export with overlays burned in</button>
+          <div class="export-aspect-row" id="exportSpeedChips">
+            <span class="export-label">Speed</span>
+            <span class="chip" data-speed="0.5">0.5×</span>
+            <span class="chip on" data-speed="1">1×</span>
+            <span class="chip" data-speed="1.5">1.5×</span>
+            <span class="chip" data-speed="2">2×</span>
+          </div>
+          <div class="export-aspect-row" id="exportQualityChips">
+            <span class="export-label">Quality</span>
+            <span class="chip on" data-quality="source">Source</span>
+            <span class="chip" data-quality="high">1080p</span>
+            <span class="chip" data-quality="medium">720p</span>
+          </div>
+          <div class="export-aspect-row" style="flex-wrap:wrap">
+            <span class="export-label">Audio</span>
+            <label class="btn btn-sm" for="bedAudioInput" style="cursor:pointer">🎵 Add music / voiceover</label>
+            <input type="file" id="bedAudioInput" accept="audio/*" hidden>
+          </div>
+          <div id="bedAudioRow" class="hidden" style="display:flex; align-items:center; gap:8px; margin-top:6px">
+            <span class="hint" id="bedAudioName" style="margin:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
+            <input type="range" id="bedVolume" min="0" max="100" value="70" style="flex:0 0 90px; accent-color:var(--accent)">
+            <button class="btn btn-sm" id="bedAudioClear" title="Remove">✕</button>
+          </div>
+          <button class="btn" id="btnExportBaked" style="margin-top:6px; width:100%;">🎬 Export video</button>
         </div>
         <div id="trimControls" style="margin-top:8px; padding-top:10px; border-top:1px solid var(--border)">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px">
@@ -1341,6 +1369,14 @@ const EXPORT_ASPECTS = {
   '16:9':   { label: '16:9', size: { W: 1920, H: 1080 } },
 };
 
+// Export quality presets — cap the vertical resolution and set an encoder
+// bitrate. 'source' = no cap, let MediaRecorder pick (the pre-existing default).
+const EXPORT_QUALITY = {
+  'source': { label: 'Source', maxH: 0,    bitrate: 0 },
+  'high':   { label: '1080p',  maxH: 1080, bitrate: 8_000_000 },
+  'medium': { label: '720p',   maxH: 720,  bitrate: 4_000_000 },
+};
+
 // Given source dims and a target aspect, return target canvas dims + the source
 // crop rect to draw from (cover semantics — fill the target, crop the longer axis).
 function computeAspectFrame(srcW, srcH, aspect) {
@@ -1404,13 +1440,17 @@ const S = {
   canvasStream: null,
   compositor: null, // { canvas, ctx, rafId }
   mode: 'quick',         // 'quick' | 'studio' — gates the power-user surface
-  overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true },
+  overlay: { x: 82, y: 82, size: 's', shape: 'rounded', mirror: true, autoSize: false },
   look: 'none',          // 'none' | 'studio' | 'spotlight' | 'color' | 'custom'
   lookColor: '#0a1420',  // active solid color for look === 'color'
   lookImageUrl: null,    // object URL for custom uploaded image (session-only)
   lookImage: null,       // Image element loaded from lookImageUrl
   followCursor: false,   // continuous smart-follow zoom via frame-diff motion centroid
   exportAspect: 'native',// 'native' | '1:1' | '9:16' | '16:9' — burn-in export framing
+  exportSpeed: 1,        // 0.5 | 1 | 1.5 | 2 — playback-rate re-time on export
+  exportQuality: 'source', // 'source' | 'high' | 'medium' — resolution cap + bitrate on export
+  bedAudio: null,        // { name, url, el } — imported music/voiceover mixed on export (session-only)
+  bedVolume: 0.7,        // 0..1 gain for the imported bed relative to original audio
   pipWindow: null,
   devices: { cams: [], mics: [] },
   // Quality is locked to the best supported. The only knobs the user touches
@@ -1587,7 +1627,9 @@ function loadLook() {
 // Persist export aspect ratio choice
 const LS_EXPORT = 'bolo.export.v1';
 function saveExport() {
-  try { localStorage.setItem(LS_EXPORT, JSON.stringify({ exportAspect: S.exportAspect })); } catch(e) {}
+  try { localStorage.setItem(LS_EXPORT, JSON.stringify({
+    exportAspect: S.exportAspect, exportSpeed: S.exportSpeed, exportQuality: S.exportQuality,
+  })); } catch(e) {}
 }
 function loadExport() {
   try {
@@ -1596,6 +1638,10 @@ function loadExport() {
     const saved = JSON.parse(raw);
     if (typeof saved.exportAspect === 'string' && EXPORT_ASPECTS[saved.exportAspect]) {
       S.exportAspect = saved.exportAspect;
+    }
+    if ([0.5, 1, 1.5, 2].includes(saved.exportSpeed)) S.exportSpeed = saved.exportSpeed;
+    if (typeof saved.exportQuality === 'string' && EXPORT_QUALITY[saved.exportQuality]) {
+      S.exportQuality = saved.exportQuality;
     }
   } catch(e) {}
 }
@@ -1917,10 +1963,7 @@ function updatePreview() {
   }
 
   // Stop existing compositor
-  if (S.compositor) {
-    cancelAnimationFrame(S.compositor.rafId);
-    S.compositor = null;
-  }
+  stopCompositor();
 
   const hasScreen = !!S.streams.screen;
   const hasWebcam = !!S.streams.webcam;
@@ -2023,6 +2066,14 @@ function attachWebcamDrag() {
 }
 
 // ---------- Canvas compositor for recording ----------
+// Tear down the live compositor (rAF loop + any mic analyser context it owns).
+function stopCompositor() {
+  if (!S.compositor) return;
+  cancelAnimationFrame(S.compositor.rafId);
+  if (S.compositor.micCtx) { try { S.compositor.micCtx.close(); } catch(e) {} }
+  S.compositor = null;
+}
+
 function buildCompositeStream() {
   // Canvas-composite whenever there's something to do on top of pass-through:
   // both sources combined, a Look preset applied, or follow-cursor zoom on.
@@ -2066,6 +2117,21 @@ function buildCompositeStream() {
 
     const sizeMap = { s: 0.15, m: 0.25, l: 0.35 };
     const pct = sizeMap[S.overlay.size];
+
+    // ----- Dynamic bubble: drive the webcam size from live mic loudness so it
+    // swells while the user talks and shrinks on pauses (Recordly's "spotlight
+    // when you need it"). Only active with both sources + a mic + the toggle on.
+    const autoSize = !!S.overlay.autoSize && hasWebcam && hasScreen && !!S.streams.mic;
+    let micAnalyser = null, micData = null, micCtx = null, dynScale = 1;
+    if (autoSize) {
+      try {
+        micCtx = new (window.AudioContext || window.webkitAudioContext)();
+        micAnalyser = micCtx.createAnalyser();
+        micAnalyser.fftSize = 256;
+        micCtx.createMediaStreamSource(S.streams.mic).connect(micAnalyser);
+        micData = new Uint8Array(micAnalyser.frequencyBinCount);
+      } catch(e) { micAnalyser = null; }
+    }
 
     // ----- Follow-cursor: tiny offscreen canvas for motion-centroid detection.
     // Sampled at ~5 FPS (every 6th draw at 30 FPS). The cursor position is
@@ -2183,7 +2249,16 @@ function buildCompositeStream() {
         // Position is a percentage of the inner rect so the overlay still hugs
         // the corner of the framed content under any Look.
         if (hasScreen && hasWebcam) {
-          const ww = Math.floor(iw * pct);
+          // Loudness → smoothed size multiplier (1..1.6). Low-pass so it breathes.
+          if (autoSize && micAnalyser) {
+            micAnalyser.getByteFrequencyData(micData);
+            let sum = 0; for (let i = 0; i < micData.length; i++) sum += micData[i];
+            const avg = sum / micData.length;
+            const target = 1 + Math.min(1, avg / 64) * 0.6;
+            dynScale = dynScale * 0.85 + target * 0.15;
+          }
+          const effPct = pct * (autoSize ? dynScale : 1);
+          const ww = Math.floor(iw * effPct);
           const wh = (S.overlay.shape === 'circle') ? ww : Math.floor(ww * (9/16));
           let wx = Math.floor((S.overlay.x / 100) * iw - ww / 2) + ix;
           let wy = Math.floor((S.overlay.y / 100) * ih - wh / 2) + iy;
@@ -2216,7 +2291,7 @@ function buildCompositeStream() {
       } catch(e) {}
       S.compositor.rafId = requestAnimationFrame(draw);
     };
-    S.compositor = { canvas, ctx, rafId: 0, screenVid, webcamVid };
+    S.compositor = { canvas, ctx, rafId: 0, screenVid, webcamVid, micCtx };
     draw();
     const cs = canvas.captureStream(S.settings.fps);
     S.canvasStream = cs;
@@ -2407,7 +2482,7 @@ function cancelRecording() {
   recOverlay.classList.remove('on');
   floatBar.classList.remove('on');
   closePipControls();
-  if (S.compositor) { cancelAnimationFrame(S.compositor.rafId); S.compositor = null; }
+  stopCompositor();
   S.recordedBlob = null;
   resetToIdle();
 }
@@ -2416,7 +2491,7 @@ function onRecorderStopped() {
   if (S.chunks.length === 0) { resetToIdle(); return; }
   S.recordedBlob = new Blob(S.chunks, { type: S.recordedMime });
   // Stop canvas compositor now that we've captured everything
-  if (S.compositor) { cancelAnimationFrame(S.compositor.rafId); S.compositor = null; }
+  stopCompositor();
   // Save into session history
   pushHistory(S.recordedBlob, S.recordedMime);
   // Show recorded playback
@@ -2431,6 +2506,10 @@ function onRecorderStopped() {
   $('panelAnnotations').classList.remove('hidden');
   S.annotations = [];
   renderAnnotList();
+  // A fresh recording drops any imported audio bed (it was tied to the last clip).
+  if (S.bedAudio && S.bedAudio.url) { try { URL.revokeObjectURL(S.bedAudio.url); } catch(_){} }
+  S.bedAudio = null;
+  $('bedAudioRow').classList.add('hidden');
   // Fresh recording — clear any AI state carried over from a previous one and
   // reveal the insights panel (Studio-only via CSS) so the visual timeline is
   // available right away, even before (or without) captions.
@@ -2453,6 +2532,7 @@ function onRecorderStopped() {
   }
   setState('done');
   updateRecordButton();
+  updateExportButtonVisibility();
   // Speculative pre-transcription: model load → audio extract → inference,
   // all silent. Most users spend several seconds reviewing — by the time
   // they click Generate Captions, the result is already waiting.
@@ -3834,8 +3914,10 @@ function drawAnnotationOnCanvas(ctx, a, W, H, srcVid, srcCrop) {
   ctx.restore();
 }
 
-async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress }) {
+async function bakeRecording({ withCaptions, withAnnotations, aspect, speed, quality, bed, bedVolume, onProgress }) {
   if (!S.recordedBlob) throw new Error('No recording to export');
+  const rate = [0.5, 1, 1.5, 2].includes(speed) ? speed : 1;
+  const q = EXPORT_QUALITY[quality] || EXPORT_QUALITY.source;
 
   // 1) Source video — hidden, plays through end-to-end. Muted so the user's
   // speakers don't blast; the audio track in the stream is still live.
@@ -3854,7 +3936,14 @@ async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress
 
   // 2) Composition canvas — sized to the chosen aspect (Native = source dims).
   // A non-native aspect runs a center-crop on the source (cover semantics).
-  const { tgtW: W, tgtH: H, srcCrop } = computeAspectFrame(srcW, srcH, aspect || 'native');
+  let { tgtW: W, tgtH: H, srcCrop } = computeAspectFrame(srcW, srcH, aspect || 'native');
+  // Quality cap: scale the target down uniformly if it exceeds the preset's max
+  // height. Annotation coords are target-relative (0..1) so they survive the scale.
+  if (q.maxH && H > q.maxH) {
+    const s = q.maxH / H;
+    W = Math.round(W * s / 2) * 2; // keep even dims for the encoder
+    H = Math.round(H * s / 2) * 2;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -3863,9 +3952,28 @@ async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress
   // be wasteful — annotation coords don't change across frames).
   const mappedAnnotations = (S.annotations || []).map(a => mapAnnotationToTarget(a, srcW, srcH, srcCrop));
 
-  // 3) Combined stream: canvas video + source audio.
+  // 3) Combined stream: canvas video + audio. Audio is either the source track
+  // passed through, or — when a background bed is imported — the source mixed
+  // with the bed through an AudioContext (both at their own gain).
   const srcStream = srcVid.captureStream();
-  const audioTracks = srcStream.getAudioTracks();
+  const origAudioTracks = srcStream.getAudioTracks();
+  let audioTracks = origAudioTracks;
+  let audioCtx = null, bedEl = null;
+  if (bed && bed.url) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch(e) {} }
+    const dest = audioCtx.createMediaStreamDestination();
+    if (origAudioTracks.length) {
+      audioCtx.createMediaStreamSource(new MediaStream(origAudioTracks)).connect(dest);
+    }
+    bedEl = document.createElement('audio');
+    bedEl.src = bed.url; bedEl.loop = true; bedEl.crossOrigin = 'anonymous';
+    const gain = audioCtx.createGain();
+    gain.gain.value = (typeof bedVolume === 'number') ? bedVolume : 0.7;
+    audioCtx.createMediaElementSource(bedEl).connect(gain);
+    gain.connect(dest);
+    audioTracks = dest.stream.getAudioTracks();
+  }
   const canvasStream = canvas.captureStream(30);
   const combined = new MediaStream([
     ...canvasStream.getVideoTracks(),
@@ -3873,7 +3981,9 @@ async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress
   ]);
 
   const mime = pickMimeType();
-  const recorder = new MediaRecorder(combined, { mimeType: mime });
+  const recOpts = { mimeType: mime };
+  if (q.bitrate) recOpts.videoBitsPerSecond = q.bitrate;
+  const recorder = new MediaRecorder(combined, recOpts);
   const chunks = [];
   recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   const donePromise = new Promise(resolve => {
@@ -3903,7 +4013,15 @@ async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress
   };
 
   recorder.start(1000);
-  try { await srcVid.play(); } catch(e) { alive = false; URL.revokeObjectURL(srcVid.src); throw e; }
+  srcVid.playbackRate = rate;
+  try {
+    await srcVid.play();
+    if (bedEl) { bedEl.currentTime = 0; await bedEl.play().catch(() => {}); }
+  } catch(e) {
+    alive = false; URL.revokeObjectURL(srcVid.src);
+    if (bedEl) { try { bedEl.pause(); } catch(_){} } if (audioCtx) { try { audioCtx.close(); } catch(_){} }
+    throw e;
+  }
 
   if (typeof srcVid.requestVideoFrameCallback === 'function') {
     const loop = () => {
@@ -3928,36 +4046,63 @@ async function bakeRecording({ withCaptions, withAnnotations, aspect, onProgress
   alive = false;
   try { recorder.stop(); } catch(e) {}
   const blob = await donePromise;
+  if (bedEl) { try { bedEl.pause(); } catch(_){} }
+  if (audioCtx) { try { await audioCtx.close(); } catch(_){} }
   URL.revokeObjectURL(srcVid.src);
   return blob;
+}
+
+// Which export transforms are currently active? Any one of these means the
+// output must be re-baked; none means the raw recording can be handed back as-is.
+function exportTransforms() {
+  const hasCap = !!(S.transcript && S.transcript.length);
+  const hasAnn = !!(S.annotations && S.annotations.length);
+  return {
+    hasCap, hasAnn,
+    speed: S.exportSpeed !== 1,
+    quality: S.exportQuality !== 'source',
+    bed: !!S.bedAudio,
+    aspect: !!(S.exportAspect && S.exportAspect !== 'native'),
+    get any() { return hasCap || hasAnn || this.speed || this.quality || this.bed || this.aspect; },
+  };
 }
 
 async function exportWithOverlays() {
   if (!S.recordedBlob) return;
   if (S.exporting) return;
-  const hasCap = !!(S.transcript && S.transcript.length);
-  const hasAnn = !!(S.annotations && S.annotations.length);
-  if (!hasCap && !hasAnn) return;
+  const tf = exportTransforms();
   const btn = $('btnExportBaked');
   const origLabel = btn.textContent;
+  const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
+  const base = active ? active.name.replace(/\.(webm|mp4)$/i, '') : filenameBase();
+  const ext = mimeToExt(S.recordedMime);
+
+  // Fast path: no transform selected — hand back the recording untouched.
+  if (!tf.any) { downloadBlob(S.recordedBlob, base + '.' + ext); return; }
+
   S.exporting = true;
   btn.disabled = true;
   btn.textContent = '🎬 Exporting…';
   hideWarning();
   try {
     const blob = await bakeRecording({
-      withCaptions: hasCap,
-      withAnnotations: hasAnn,
+      withCaptions: tf.hasCap,
+      withAnnotations: tf.hasAnn,
       aspect: S.exportAspect,
+      speed: S.exportSpeed,
+      quality: S.exportQuality,
+      bed: S.bedAudio,
+      bedVolume: S.bedVolume,
       onProgress: (frac, msg) => setProgress(frac, msg),
     });
     setProgress(1, 'Export ready');
     setTimeout(hideProgress, 800);
-    const active = S.activeHistoryId && S.history.find(h => h.id === S.activeHistoryId);
-    const base = active ? active.name.replace(/\.(webm|mp4)$/i, '') : filenameBase();
-    const ext = mimeToExt(S.recordedMime);
-    const aspectTag = S.exportAspect && S.exportAspect !== 'native' ? '-' + S.exportAspect.replace(':', 'x') : '';
-    downloadBlob(blob, base + '-burned' + aspectTag + '.' + ext);
+    const tags = [
+      tf.aspect ? S.exportAspect.replace(':', 'x') : '',
+      tf.speed ? String(S.exportSpeed).replace('.', 'p') + 'x' : '',
+      tf.quality ? S.exportQuality : '',
+    ].filter(Boolean).join('-');
+    downloadBlob(blob, base + '-export' + (tags ? '-' + tags : '') + '.' + ext);
     btn.textContent = '✓ Exported — click to redo';
     setTimeout(() => { btn.textContent = origLabel; }, 4000);
   } catch (e) {
@@ -3971,21 +4116,20 @@ async function exportWithOverlays() {
   }
 }
 
-// Reveal / hide the burn-in export controls (aspect chips + export button) based on
-// what's bakeable for the current recording.
+// Reveal / hide the export controls. The controls appear whenever there's a
+// recording (aspect / speed / quality / audio all apply without captions); the
+// button label reflects what's currently set.
 function updateExportButtonVisibility() {
   const wrap = $('exportWrap');
   const btn = $('btnExportBaked');
   if (!wrap || !btn) return;
-  const hasCap = !!(S.transcript && S.transcript.length);
-  const hasAnn = !!(S.annotations && S.annotations.length);
-  const canExport = !!S.recordedBlob && (hasCap || hasAnn);
-  wrap.classList.toggle('hidden', !canExport);
-  if (canExport) {
-    if (hasCap && hasAnn)       btn.textContent = '🎬 Export with captions + annotations burned in';
-    else if (hasCap)            btn.textContent = '🎬 Export with captions burned in';
-    else                        btn.textContent = '🎬 Export with annotations burned in';
-  }
+  wrap.classList.toggle('hidden', !S.recordedBlob);
+  if (!S.recordedBlob) return;
+  const tf = exportTransforms();
+  const burns = [tf.hasCap && 'captions', tf.hasAnn && 'annotations'].filter(Boolean);
+  if (burns.length)      btn.textContent = '🎬 Export — ' + burns.join(' + ') + ' burned in';
+  else if (tf.any)       btn.textContent = '🎬 Export video';
+  else                   btn.textContent = '↓ Export video (no changes)';
 }
 
 // ---------- Annotations (post-record arrow / box / text, baked into the export) ----------
@@ -4346,6 +4490,54 @@ $('exportAspectChips').addEventListener('click', e => {
   chip.classList.add('on');
   S.exportAspect = chip.dataset.aspect;
   saveExport();
+  updateExportButtonVisibility();
+});
+
+// Export speed chips — playback-rate re-time on the bake
+$('exportSpeedChips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip || !chip.dataset.speed) return;
+  $('exportSpeedChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  chip.classList.add('on');
+  S.exportSpeed = parseFloat(chip.dataset.speed);
+  saveExport();
+  updateExportButtonVisibility();
+});
+
+// Export quality chips — resolution cap + encoder bitrate on the bake
+$('exportQualityChips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip || !chip.dataset.quality) return;
+  $('exportQualityChips').querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  chip.classList.add('on');
+  S.exportQuality = chip.dataset.quality;
+  saveExport();
+  updateExportButtonVisibility();
+});
+
+// Background audio — import a music bed / voiceover mixed in on export (session-only)
+$('bedAudioInput').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (S.bedAudio && S.bedAudio.url) { try { URL.revokeObjectURL(S.bedAudio.url); } catch(_){} }
+  S.bedAudio = { name: file.name, url: URL.createObjectURL(file) };
+  $('bedAudioName').textContent = '🎵 ' + file.name;
+  $('bedAudioRow').classList.remove('hidden');
+  updateExportButtonVisibility();
+});
+$('bedAudioClear').addEventListener('click', () => {
+  if (S.bedAudio && S.bedAudio.url) { try { URL.revokeObjectURL(S.bedAudio.url); } catch(_){} }
+  S.bedAudio = null;
+  $('bedAudioRow').classList.add('hidden');
+  updateExportButtonVisibility();
+});
+$('bedVolume').addEventListener('input', e => { S.bedVolume = (parseInt(e.target.value, 10) || 0) / 100; });
+
+// Dynamic webcam bubble — grows when you speak (mic-loudness driven)
+$('autoSizeToggle').addEventListener('change', e => {
+  S.overlay.autoSize = e.target.checked;
+  saveOverlay();
 });
 
 // Quick / Studio mode toggle
@@ -4584,12 +4776,16 @@ applyMode();
 document.querySelectorAll('#sizeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.size === S.overlay.size));
 document.querySelectorAll('#shapeChips .chip').forEach(c => c.classList.toggle('on', c.dataset.shape === S.overlay.shape));
 $('mirrorToggle').checked = !!S.overlay.mirror;
+$('autoSizeToggle').checked = !!S.overlay.autoSize;
 // Reflect loaded Look state (incl. solid-color dot)
 $('lookColorInput').value = /^#[0-9a-fA-F]{6}$/.test(S.lookColor) ? S.lookColor : '#0a1420';
 reflectLookChips();
 $('followCursorToggle').checked = !!S.followCursor;
-// Reflect loaded export aspect
+// Reflect loaded export aspect / speed / quality
 document.querySelectorAll('#exportAspectChips .chip').forEach(c => c.classList.toggle('on', c.dataset.aspect === S.exportAspect));
+document.querySelectorAll('#exportSpeedChips .chip').forEach(c => c.classList.toggle('on', parseFloat(c.dataset.speed) === S.exportSpeed));
+document.querySelectorAll('#exportQualityChips .chip').forEach(c => c.classList.toggle('on', c.dataset.quality === S.exportQuality));
+$('bedVolume').value = Math.round((S.bedVolume ?? 0.7) * 100);
 // Reflect loaded settings into the form controls
 $('langSelect').value = S.settings.whisperLang;
 $('translateToggle').checked = !!S.settings.whisperTranslate;
@@ -4609,7 +4805,6 @@ opfsLoadAll().then(items => {
 if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
   showWarning('Your browser does not support screen capture. Try a recent Chrome, Edge, Firefox or Safari.');
   document.querySelectorAll('[data-src]').forEach(b => b.disabled = true);
-}
-</script>
+}</script>
 </body>
 </html>

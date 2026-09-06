@@ -7,8 +7,8 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 ## What it does
 
 - **Screen + webcam + mic capture** via `getDisplayMedia` / `getUserMedia`
-- **Drag-to-position picture-in-picture webcam overlay** — size, shape, mirror — composited in-browser via canvas. Position is remembered between sessions.
-- **Quick / Studio mode toggle** in the header. **Quick** = minimal recorder (Sources / Captions / Record / Download). **Studio** = full surface (adds Looks, follow-cursor, AI insights, annotations, burn-in export with aspect-ratio presets). Defaults to Quick; persists per device.
+- **Drag-to-position picture-in-picture webcam overlay** — size, shape, mirror — composited in-browser via canvas. Position is remembered between sessions. Optional **dynamic bubble** grows the webcam while you speak and shrinks it on pauses (mic-loudness driven, smoothed).
+- **Quick / Studio mode toggle** in the header. **Quick** = minimal recorder (Sources / Captions / Record / Download). **Studio** = full surface (adds Looks, follow-cursor, dynamic webcam bubble, AI insights, annotations, burn-in export with aspect / speed / quality and a background-audio track). Defaults to Quick; persists per device.
 - **Look presets with live stage preview** — five backgrounds: **None / Studio / Spotlight / Color / Custom**. Studio and Spotlight are Cap-style gradient bundles with padding, rounded corners, and a soft drop shadow. Color opens a picker for any solid hex; Custom takes any uploaded image (cover-fit). Composited live in the recording canvas, and a CSS-only mirror of the active Look paints onto the stage *before* recording so you see what you'll get.
 - **Follow-cursor zoom** — optional. Bolo infers the on-screen "interesting region" from frame-to-frame pixel deltas (the browser can't read cursor position from a `getDisplayMedia` stream the way Cap can from a native API) and gently pans + zooms 1.4× toward it. One toggle, no intensity slider.
 - **Local Whisper transcription** via Transformers.js. Whisper Small (~250 MB, downloaded once and cached), 15 languages, auto-detect, translate-to-English toggle. Pre-transcription kicks off the moment you stop recording so clicking Generate Captions is usually instant.
@@ -18,7 +18,8 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 - **Ask about a frame** — *Studio.* Pause on any moment, type a question ("what does this error say?", "what's the revenue number?"), and the same on-device vision model answers about what's on screen right then. Shares the visual-timeline model — no extra download.
 - **In-browser trim** — scrub the playback, mark in/out from the playhead, then cut. Frame-accurate, re-encoded locally via [mediabunny](https://github.com/Vanilagy/mediabunny) (pure-WebCodecs, no ffmpeg) — usually a second or two, and nothing leaves your device. Replaces the recording in place.
 - **Post-record annotations** — four draw tools (arrow, box, text, **blur**) drawable on the playback. Each is visible for 3 seconds from the moment you draw it. Render as an SVG overlay live (with `backdrop-filter:blur` for the blur tool); bake into the export when you choose "Export with overlays burned in". The blur tool is the OpenScreen-inspired redaction box — drag over a credit card / password / PII region and it pixelates in the export.
-- **Burn-in export with aspect-ratio presets** — re-encode the recording with captions and/or annotations baked into the pixels (so the result works on YouTube / Twitter / embedded players where a sidecar `.srt` doesn't). Pick a target aspect ratio — **Native / 1:1 / 9:16 / 16:9** — and the bake pipeline center-crops + re-frames for social. Drives a canvas + MediaRecorder pipeline from the source video's `requestVideoFrameCallback`, with audio passing through via `srcVid.captureStream().getAudioTracks()`. ~1× real-time — a 5-minute recording takes ~5 minutes to bake.
+- **Burn-in export with aspect, speed & quality** — re-encode the recording with captions and/or annotations baked into the pixels (so the result works on YouTube / Twitter / embedded players where a sidecar `.srt` doesn't). Pick a target aspect ratio — **Native / 1:1 / 9:16 / 16:9** (center-cropped + re-framed for social), an export **speed** — **0.5× / 1× / 1.5× / 2×** (time-lapse a slow demo, or slow-mo a fast one, via the source video's `playbackRate`), and a **quality** cap — **Source / 1080p / 720p** (downscale + lower bitrate for a smaller shareable file). Drives a canvas + MediaRecorder pipeline from the source video's `requestVideoFrameCallback`. ~1× real-time — a 5-minute recording takes ~5 minutes to bake. With no transform selected, Export just hands back the untouched recording.
+- **Background audio track** — drop in a music bed or voiceover (`🎵 Add music / voiceover`) and it's mixed into the export through an `AudioContext`, with a volume slider balancing it against the original audio. Turns a silent screen capture into a narrated or scored clip — session-only, nothing uploaded.
 - **SRT / VTT / TXT subtitle export**. Download bundles a same-name `.srt` automatically so VLC, IINA and mpv auto-load it. For caption burn-in, run `ffmpeg -i in.webm -vf subtitles=in.srt out.mp4` at the shell (Bolo's in-browser burn-in is deferred — see *Known limitations*).
 - **Persistent recordings gallery** — recent captures live in OPFS (browser-private filesystem), survive reloads, 500 MB cap with FIFO eviction. Transcripts and AI insights persist alongside the blob.
 - **Cross-tab control** — recording another tab? Bolo opens a tiny always-on-top Document Picture-in-Picture window with timer + pause + stop, so you can control it from anywhere.
@@ -42,7 +43,7 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 
 ## Philosophy
 
-Bolo doesn't ask you to pick "Tiny / Base / Small" or "720p / 1080p / 1440p" or "VP8 / VP9". Quality is always the best supported by your browser. The only choices you make are about *intent* — what language are you speaking in, do you want it translated. The rest is noise.
+Bolo doesn't ask you to pick "Tiny / Base / Small" or "VP8 / VP9". *Recording* quality is always the best supported by your browser. The only choices at capture time are about *intent* — what language are you speaking in, do you want it translated. The rest is noise. The one place a quality knob appears is *export*, and it's still about intent: 720p / 1080p downscales a finished clip so it's small enough to share, not a dial you set before you know what you've got.
 
 ## Privacy
 
@@ -90,7 +91,7 @@ Or just open `index.html` directly in Chrome — works from `file://` too.
 
 ## User guide
 
-A walkthrough with screenshots of every feature — Quick / Studio modes, Looks, follow-cursor zoom, captions, AI insights, annotations, blur, burn-in export with aspect-ratio presets, gallery, keyboard shortcuts, privacy.
+A walkthrough with screenshots of every feature — Quick / Studio modes, Looks, follow-cursor zoom, dynamic webcam bubble, captions, AI insights, annotations, blur, burn-in export with aspect / speed / quality, background audio, gallery, keyboard shortcuts, privacy.
 
 - **Local**: [`docs/guide.html`](docs/guide.html)
 - **Hosted**: [bolo.naklitechie.com/docs/guide.html](https://bolo.naklitechie.com/docs/guide.html)
