@@ -201,11 +201,14 @@ await page.evaluate(() => {
 });
 await shot('07-annotations-blur');
 
-// ---------- 8) Burn-in export with aspect chips ----------
+// ---------- 8) Export panel: aspect + speed + quality + audio ----------
 await page.evaluate(() => {
   document.getElementById('exportWrap').classList.remove('hidden');
-  document.getElementById('btnExportBaked').textContent = '🎬 Export with captions + annotations burned in';
-  document.querySelector('.sidebar').scrollTop = 540;
+  // Show the imported-audio row populated so the whole panel is visible.
+  document.getElementById('bedAudioRow').classList.remove('hidden');
+  document.getElementById('bedAudioName').textContent = '🎵 background-music.mp3';
+  document.getElementById('btnExportBaked').textContent = '🎬 Export — captions + annotations burned in';
+  document.getElementById('exportWrap').scrollIntoView({ block: 'center' });
 });
 await shot('08-burn-in-export');
 

@@ -934,6 +934,39 @@
   .stage-label:first-child { margin-top: 0; }
 
   .hidden { display: none !important; }
+
+  /* First-run guided tour — spotlight + step card (ported from Slate) */
+  .tour-layer { position: fixed; inset: 0; z-index: 4000; pointer-events: auto; }
+  .tour-spotlight {
+    position: fixed; z-index: 4001;
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    box-shadow: 0 0 0 4px var(--accent-dim), 0 0 0 9999px rgba(0,0,0,0.72);
+    pointer-events: none;
+    transition: top .28s ease, left .28s ease, width .28s ease, height .28s ease;
+  }
+  .tour-card {
+    position: fixed; z-index: 4002;
+    width: min(340px, calc(100vw - 24px));
+    padding: 20px;
+    border: 1px solid var(--border-2);
+    border-radius: 14px;
+    background: var(--bg-2);
+    color: var(--text);
+    box-shadow: 0 20px 48px rgba(0,0,0,0.6);
+  }
+  .tour-progress {
+    margin: 0 0 8px; color: var(--accent);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .tour-card h2 { margin: 0 0 8px; font-size: 17px; }
+  .tour-card p { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+  .tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+  .tour-skip { margin-right: auto; }
+  @media (max-width: 520px) {
+    .tour-card { padding: 14px; }
+    .tour-actions { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
@@ -1282,6 +1315,7 @@
 
     <div class="btn-row">
       <span style="margin-right:auto; font-size:11px; color:var(--text-mute)">Bolo v1.1.0 · single HTML file</span>
+      <button class="btn" id="helpTour">Take the tour</button>
       <button class="btn btn-primary" id="helpClose">Got it</button>
     </div>
   </div>
@@ -4800,6 +4834,132 @@ opfsLoadAll().then(items => {
     renderHistory();
   }
 }).catch(() => {});
+
+// ---------- First-run guided tour (spotlight + step card) ----------
+const tour = (() => {
+  const TOUR_KEY = 'bolo.v1.tour-complete';
+  const STEPS = [
+    { target: '#panelSources', title: 'Pick what to capture',
+      body: 'Toggle Screen, Webcam and Mic here. Whatever you pick is composited live in this browser — nothing is uploaded, no account, no server.' },
+    { target: '#modeChips', title: 'Quick or Studio',
+      body: 'Quick is a minimal recorder. Switch to Studio for Looks, follow-cursor zoom, a dynamic webcam bubble, on-device captions & AI insights, annotations, and export with aspect / speed / quality / background audio.' },
+    { target: '#panelLook', title: 'Frame it',
+      body: 'Studio Looks add a background, padding and a gentle follow-cursor zoom — previewed live on the stage before you ever hit Record.' },
+    { target: '#fabRecord', title: 'Record',
+      body: 'A 3-2-1 countdown, then capture begins. Pause and stop from the floating bar — or from a tiny always-on-top window when you record another tab.' },
+    { target: '#helpBtn', title: 'Everything is here',
+      body: 'Reopen this button for keyboard shortcuts, the full guide, and to replay this tour whenever you like.' },
+  ];
+
+  let layer = null, stepIndex = 0, previousFocus = null, activeSteps = STEPS;
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+  function targetIsVisible(step) {
+    const t = document.querySelector(step.target);
+    if (!t) return false;
+    const r = t.getBoundingClientRect(), st = getComputedStyle(t);
+    return r.width > 0 && r.height > 0 && st.display !== 'none' && st.visibility !== 'hidden';
+  }
+  function currentTarget() {
+    return document.querySelector(activeSteps[stepIndex].target) || document.body;
+  }
+  function positionTour() {
+    if (!layer) return;
+    const target = currentTarget();
+    target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const rect = target.getBoundingClientRect(), pad = 6;
+    const spot = layer.querySelector('.tour-spotlight');
+    spot.style.top = Math.max(4, rect.top - pad) + 'px';
+    spot.style.left = Math.max(4, rect.left - pad) + 'px';
+    spot.style.width = Math.max(24, Math.min(innerWidth - 8, rect.width + pad * 2)) + 'px';
+    spot.style.height = Math.max(24, Math.min(innerHeight - 8, rect.height + pad * 2)) + 'px';
+    const card = layer.querySelector('.tour-card'), cardRect = card.getBoundingClientRect();
+    const gap = 18, margin = 12; let top, left;
+    if (rect.bottom + gap + cardRect.height <= innerHeight - margin) {
+      top = rect.bottom + gap; left = rect.left + rect.width / 2 - cardRect.width / 2;
+    } else if (rect.top - gap - cardRect.height >= margin) {
+      top = rect.top - gap - cardRect.height; left = rect.left + rect.width / 2 - cardRect.width / 2;
+    } else if (rect.left - gap - cardRect.width >= margin) {
+      top = rect.top + rect.height / 2 - cardRect.height / 2; left = rect.left - gap - cardRect.width;
+    } else if (rect.right + gap + cardRect.width <= innerWidth - margin) {
+      top = rect.top + rect.height / 2 - cardRect.height / 2; left = rect.right + gap;
+    } else {
+      top = innerHeight - cardRect.height - margin; left = innerWidth / 2 - cardRect.width / 2;
+    }
+    card.style.top = clamp(top, margin, innerHeight - cardRect.height - margin) + 'px';
+    card.style.left = clamp(left, margin, innerWidth - cardRect.width - margin) + 'px';
+    card.style.visibility = 'visible';
+  }
+  function renderStep() {
+    if (!layer) return;
+    const step = activeSteps[stepIndex];
+    layer.querySelector('.tour-progress').textContent = 'Quick tour · ' + (stepIndex + 1) + ' of ' + activeSteps.length;
+    layer.querySelector('.tour-title').textContent = step.title;
+    layer.querySelector('.tour-body').textContent = step.body;
+    layer.querySelector('.tour-back').disabled = stepIndex === 0;
+    layer.querySelector('.tour-next').textContent = stepIndex === activeSteps.length - 1 ? 'Finish' : 'Next';
+    layer.querySelector('.tour-card').style.visibility = 'hidden';
+    requestAnimationFrame(() => { positionTour(); layer && layer.querySelector('.tour-next').focus(); });
+  }
+  function finish() { try { localStorage.setItem(TOUR_KEY, '1'); } catch(e) {} close(); }
+  function close() {
+    if (!layer) return;
+    const old = layer; layer = null;
+    window.removeEventListener('resize', positionTour);
+    document.removeEventListener('keydown', onKey, true);
+    old.remove();
+    if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+    previousFocus = null;
+  }
+  function onKey(e) {
+    if (!layer) return;
+    e.stopPropagation();
+    if ((e.key === 'Enter' || e.key === ' ') && e.target instanceof Element && e.target.closest('.tour-actions button')) {
+      e.preventDefault(); e.target.click(); return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); finish(); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); if (stepIndex < activeSteps.length - 1) { stepIndex++; renderStep(); } else finish(); return; }
+    if (e.key === 'ArrowLeft' && stepIndex > 0) { e.preventDefault(); stepIndex--; renderStep(); return; }
+  }
+  function show({ force = false } = {}) {
+    let seen = false; try { seen = !!localStorage.getItem(TOUR_KEY); } catch(e) {}
+    if (layer || (!force && seen)) return false;
+    previousFocus = document.activeElement;
+    stepIndex = 0;
+    activeSteps = STEPS.filter(targetIsVisible);
+    if (!activeSteps.length) return false;
+    layer = document.createElement('div');
+    layer.className = 'tour-layer';
+    layer.innerHTML = `
+      <div class="tour-spotlight" aria-hidden="true"></div>
+      <section class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-body">
+        <div class="tour-progress"></div>
+        <h2 class="tour-title" id="tour-title"></h2>
+        <p class="tour-body" id="tour-body" aria-live="polite"></p>
+        <div class="tour-actions">
+          <button class="btn btn-sm tour-skip" type="button">Skip</button>
+          <button class="btn btn-sm tour-back" type="button">Back</button>
+          <button class="btn btn-sm btn-primary tour-next" type="button">Next</button>
+        </div>
+      </section>`;
+    document.body.appendChild(layer);
+    layer.querySelector('.tour-skip').addEventListener('click', finish);
+    layer.querySelector('.tour-back').addEventListener('click', () => { if (stepIndex > 0) { stepIndex--; renderStep(); } });
+    layer.querySelector('.tour-next').addEventListener('click', () => { if (stepIndex < activeSteps.length - 1) { stepIndex++; renderStep(); } else finish(); });
+    window.addEventListener('resize', positionTour);
+    document.addEventListener('keydown', onKey, true);
+    renderStep();
+    return true;
+  }
+  return { show };
+})();
+
+$('helpTour').addEventListener('click', () => {
+  $('helpModal').classList.remove('on');
+  setTimeout(() => tour.show({ force: true }), 60);
+});
+// First run: offer the tour once the sidebar targets are laid out.
+setTimeout(() => tour.show(), 600);
 
 // Feature-detect support
 if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {

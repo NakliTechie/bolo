@@ -23,6 +23,7 @@ Bolo is a single-HTML-file screen recorder. It captures screen + webcam + mic, t
 - **SRT / VTT / TXT subtitle export**. Download bundles a same-name `.srt` automatically so VLC, IINA and mpv auto-load it. For caption burn-in, run `ffmpeg -i in.webm -vf subtitles=in.srt out.mp4` at the shell (Bolo's in-browser burn-in is deferred — see *Known limitations*).
 - **Persistent recordings gallery** — recent captures live in OPFS (browser-private filesystem), survive reloads, 500 MB cap with FIFO eviction. Transcripts and AI insights persist alongside the blob.
 - **Cross-tab control** — recording another tab? Bolo opens a tiny always-on-top Document Picture-in-Picture window with timer + pause + stop, so you can control it from anywhere.
+- **First-run guided tour** — a spotlight walkthrough of sources, the Quick/Studio toggle, record, and help. Shows once, skippable, replayable anytime from **?** → *Take the tour*. State is a single localStorage flag; nothing tracked.
 - **3-2-1 countdown**, pause/resume, floating recording control bar, keyboard shortcuts, self-capture detection.
 - **File System Access API** — write directly to disk on Chromium, falls back to download elsewhere.
 
