@@ -10,6 +10,10 @@
 !docs/**
 !marketing
 !marketing/**
+!scripts/
+!scripts/**
+!.github/
+!.github/**
 
 # wrangler files
 .wrangler
